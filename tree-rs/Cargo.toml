@@ -1,0 +1,16 @@
+[package]
+name = "tree-rs"
+version = "0.1.0"
+authors = ["Herman Schaaf <herman.schaaf@gmail.com>"]
+description = "Generate beautiful, realistic 3D trees"
+license = "Proprietary"
+repository = "https://github.com/hermanschaaf/trees"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+micromath = { version = "2.1", features = ["quaternion", "vector"] }
+

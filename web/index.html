@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tree generator</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      #controls {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        font-family: sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      button {
+        margin: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="controls">
+      <label>
+        Seed:
+        <input id="seedInput" type="number" value="123" />
+      </label>
+      <br /><br />
+      <label>
+        Age:
+        <button id="decreaseAge">-</button>
+        <span id="ageValue">10</span>
+        <button id="increaseAge">+</button>
+      </label>
+      <br /><br />
+      <button id="generateBtn">Generate Tree</button>
+      <button id="growBtn">Grow</button>
+    </div>
+
+    <canvas id="treeCanvas"></canvas>
+
+    <script type="module">
+      import init, { generate } from "/static/js/tree_rs.js";
+
+      async function main() {
+        await init();
+
+        const canvas = document.getElementById("treeCanvas");
+        const ctx = canvas.getContext("2d");
+        const seedInput = document.getElementById("seedInput");
+        const ageValue = document.getElementById("ageValue");
+        const increaseAgeBtn = document.getElementById("increaseAge");
+        const decreaseAgeBtn = document.getElementById("decreaseAge");
+        const generateBtn = document.getElementById("generateBtn");
+        const growBtn = document.getElementById("growBtn");
+
+        let age = 0;
+        let tree = null;
+        const meterToPixel = 100;
+
+        function resizeCanvas() {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+        }
+        window.addEventListener("resize", resizeCanvas);
+        resizeCanvas();
+
+        function generateTree(seed, age) {
+            // Call Rust function
+            const tree = generate(seed, age);
+            console.log("Rust generate:", tree);
+            return tree;
+        }
+
+        function drawTree(tree, seed, age) {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const branches = tree.branches();
+            console.log("branches:", branches);
+            const padding = 40;
+            const offsetX = canvas.width / 2;
+            const offsetY = canvas.height - padding;
+
+            for (let i = 0; i < branches.length; i++) {
+                const branch = branches[i];
+                const length = branch.length;
+                const radius = 0.1; // branch.radius;
+                ctx.beginPath();
+                ctx.moveTo(offsetX + branch.start.x * meterToPixel, offsetY - branch.start.y * meterToPixel);
+                ctx.lineTo(offsetX + branch.end.x * meterToPixel, offsetY - branch.end.y * meterToPixel);
+                ctx.strokeStyle = "black";
+                ctx.lineWidth = radius * meterToPixel;
+                ctx.stroke();
+            }
+        }
+
+        growBtn.addEventListener("click", () => {
+          const seed = parseInt(seedInput.value, 10) || 0;
+          if (!tree) {
+            tree = generateTree(seed, age);
+          };
+          tree.grow();
+          drawTree(tree, seed, age);
+        });
+
+        increaseAgeBtn.addEventListener("click", () => {
+          age++;
+          ageValue.textContent = age;
+        });
+
+        decreaseAgeBtn.addEventListener("click", () => {
+          age = Math.max(0, age - 1);
+          ageValue.textContent = age;
+        });
+
+        generateBtn.addEventListener("click", () => {
+          const seed = parseInt(seedInput.value, 10) || 0;
+          tree = generateTree(seed, age);
+          drawTree(tree, seed, age);
+        });
+
+        // Initial draw
+        tree = generateTree(parseInt(seedInput.value, 10), 10);
+        drawTree(tree, parseInt(seedInput.value, 10), age);
+      }
+
+      main();
+    </script>
+  </body>
+</html>
