@@ -1,0 +1,4 @@
+web/static/js/tree_rs.js
+web/static/js/tree_rs_bg.wasm
+
+*.wasm
