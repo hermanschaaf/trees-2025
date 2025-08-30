@@ -34,14 +34,19 @@
     <div id="controls">
       <label>
         Seed:
-        <input id="seedInput" type="number" value="123" />
+        <input id="seedInput" type="number" value="1234" />
       </label>
       <br /><br />
       <label>
-        Age:
-        <button id="decreaseAge">-</button>
-        <span id="ageValue">10</span>
-        <button id="increaseAge">+</button>
+        Straightness:
+        <button id="decreaseStraightness">-</button>
+        <span id="straightnessValue">2</span>
+        <button id="increaseStraightness">+</button>
+      </label>
+      <br /><br />
+      <label>
+        Segment Length:
+        <input id="segmentLengthInput" type="number" step="0.1" min="0.1" max="1.0" value="0.3" />
       </label>
       <br /><br />
       <button id="generateBtn">Generate Tree</button>
@@ -59,13 +64,13 @@
         const canvas = document.getElementById("treeCanvas");
         const ctx = canvas.getContext("2d");
         const seedInput = document.getElementById("seedInput");
-        const ageValue = document.getElementById("ageValue");
-        const increaseAgeBtn = document.getElementById("increaseAge");
-        const decreaseAgeBtn = document.getElementById("decreaseAge");
+        const straightnessValue = document.getElementById("straightnessValue");
+        const increaseStraightnessBtn = document.getElementById("increaseStraightness");
+        const decreaseStraightnessBtn = document.getElementById("decreaseStraightness");
         const generateBtn = document.getElementById("generateBtn");
         const growBtn = document.getElementById("growBtn");
 
-        let age = 0;
+        let straightness = 2;
         let tree = null;
         let isGrowing = false;
         let growInterval = null;
@@ -79,14 +84,14 @@
         window.addEventListener("resize", resizeCanvas);
         resizeCanvas();
 
-        function generateTree(seed, age) {
+        function generateTree(seed, straightness) {
             // Call Rust function
-            const tree = generate(seed, age);
+            const tree = generate(seed, 1, 0.3, straightness);
             console.log("Rust generate:", tree);
             return tree;
         }
 
-        function drawTree(tree, seed, age) {
+        function drawTree(tree, seed, straightness) {
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -116,11 +121,11 @@
           if (isGrowing) {
             const seed = parseInt(seedInput.value, 10) || 0;
             if (!tree) {
-              tree = generateTree(seed, age);
+              tree = generateTree(seed, straightness);
             }
             growInterval = setInterval(() => {
               tree.grow();
-              drawTree(tree, seed, age);
+              drawTree(tree, seed, straightness);
             }, GROW_INTERVAL_MS);
           } else {
             if (growInterval) {
@@ -132,25 +137,25 @@
 
         growBtn.addEventListener("click", toggleGrow);
 
-        increaseAgeBtn.addEventListener("click", () => {
-          age++;
-          ageValue.textContent = age;
+        increaseStraightnessBtn.addEventListener("click", () => {
+          straightness++;
+          straightnessValue.textContent = straightness;
         });
 
-        decreaseAgeBtn.addEventListener("click", () => {
-          age = Math.max(0, age - 1);
-          ageValue.textContent = age;
+        decreaseStraightnessBtn.addEventListener("click", () => {
+          straightness = Math.max(0, straightness - 1);
+          straightnessValue.textContent = straightness;
         });
 
         generateBtn.addEventListener("click", () => {
           const seed = parseInt(seedInput.value, 10) || 0;
-          tree = generateTree(seed, age);
-          drawTree(tree, seed, age);
+          tree = generateTree(seed, straightness);
+          drawTree(tree, seed, straightness);
         });
 
         // Initial draw
-        tree = generateTree(parseInt(seedInput.value, 10), 10);
-        drawTree(tree, parseInt(seedInput.value, 10), age);
+        tree = generateTree(parseInt(seedInput.value, 10), straightness);
+        drawTree(tree, parseInt(seedInput.value, 10), straightness);
       }
 
       // Clean up interval when page unloads

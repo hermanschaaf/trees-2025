@@ -22,8 +22,8 @@ pub struct Branch {
 #[wasm_bindgen]
 impl TreeObject {
     #[wasm_bindgen(constructor)]
-    pub fn new(seed: u32, age: f32) -> TreeObject {
-        TreeObject { seed, age, tree: tree::Tree::new(seed, age) }
+    pub fn new(seed: u32, age: f32, segment_length: f32, straightness_priority: f32) -> TreeObject {
+        TreeObject { seed, age, tree: tree::Tree::new(seed, age, segment_length, straightness_priority) }
     }
 
     pub fn grow(&mut self) {
@@ -52,8 +52,8 @@ impl TreeObject {
 
 // Public API: generate a Tree
 #[wasm_bindgen]
-pub fn generate(seed: u32, age: f32) -> TreeObject {
-    let tree = tree::Tree::new(seed, age);
+pub fn generate(seed: u32, age: f32, segment_length: f32, straightness_priority: f32) -> TreeObject {
+    let tree = tree::Tree::new(seed, age, segment_length, straightness_priority);
     TreeObject { seed: tree.seed, age: tree.age, tree }
 }
 
@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let t = generate(123, 1.0);
+        let t = generate(123, 1.0, 0.1, 2.0);
         assert_eq!(t.seed, 123);
         assert_eq!(t.age, 1.0);
     }
