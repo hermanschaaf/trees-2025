@@ -67,7 +67,10 @@
 
         let age = 0;
         let tree = null;
+        let isGrowing = false;
+        let growInterval = null;
         const meterToPixel = 100;
+        const GROW_INTERVAL_MS = 50;
 
         function resizeCanvas() {
           canvas.width = window.innerWidth;
@@ -96,7 +99,7 @@
             for (let i = 0; i < branches.length; i++) {
                 const branch = branches[i];
                 const length = branch.length;
-                const radius = 0.1; // branch.radius;
+                const radius = branch.radius;
                 ctx.beginPath();
                 ctx.moveTo(offsetX + branch.start.x * meterToPixel, offsetY - branch.start.y * meterToPixel);
                 ctx.lineTo(offsetX + branch.end.x * meterToPixel, offsetY - branch.end.y * meterToPixel);
@@ -106,14 +109,28 @@
             }
         }
 
-        growBtn.addEventListener("click", () => {
-          const seed = parseInt(seedInput.value, 10) || 0;
-          if (!tree) {
-            tree = generateTree(seed, age);
-          };
-          tree.grow();
-          drawTree(tree, seed, age);
-        });
+        function toggleGrow() {
+          isGrowing = !isGrowing;
+          growBtn.textContent = isGrowing ? 'Stop' : 'Grow';
+          
+          if (isGrowing) {
+            const seed = parseInt(seedInput.value, 10) || 0;
+            if (!tree) {
+              tree = generateTree(seed, age);
+            }
+            growInterval = setInterval(() => {
+              tree.grow();
+              drawTree(tree, seed, age);
+            }, GROW_INTERVAL_MS);
+          } else {
+            if (growInterval) {
+              clearInterval(growInterval);
+              growInterval = null;
+            }
+          }
+        }
+
+        growBtn.addEventListener("click", toggleGrow);
 
         increaseAgeBtn.addEventListener("click", () => {
           age++;
@@ -135,6 +152,13 @@
         tree = generateTree(parseInt(seedInput.value, 10), 10);
         drawTree(tree, parseInt(seedInput.value, 10), age);
       }
+
+      // Clean up interval when page unloads
+      window.addEventListener('beforeunload', () => {
+        if (growInterval) {
+          clearInterval(growInterval);
+        }
+      });
 
       main();
     </script>

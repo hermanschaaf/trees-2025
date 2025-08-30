@@ -27,7 +27,7 @@ impl TreeObject {
     }
 
     pub fn grow(&mut self) {
-        self.tree.grow(1.0);
+        self.tree.grow(5.0);
     }
 
     pub fn branches(&self) -> Vec<Branch> {
