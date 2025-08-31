@@ -37,17 +37,53 @@
         <input id="seedInput" type="number" value="1234" />
       </label>
       <br /><br />
-      <label>
-        Straightness:
-        <button id="decreaseStraightness">-</button>
-        <span id="straightnessValue">2</span>
-        <button id="increaseStraightness">+</button>
-      </label>
-      <br /><br />
-      <label>
-        Segment Length:
-        <input id="segmentLengthInput" type="number" step="0.1" min="0.1" max="1.0" value="0.3" />
-      </label>
+      <div>
+        <strong>Straightness:</strong>
+        <div style="margin-left: 10px;">
+          <label>
+            Distribution:
+            <select id="straightnessDistType">
+              <option value="normal">Normal</option>
+              <option value="uniform">Uniform</option>
+              <option value="poisson">Poisson</option>
+            </select>
+          </label>
+          <br />
+          <label>
+            Location (μ/λ):
+            <input id="straightnessLoc" type="number" step="0.1" value="2.0" />
+          </label>
+          <br />
+          <label>
+            Scale (σ):
+            <input id="straightnessScale" type="number" step="0.1" value="0.5" min="0.1" />
+          </label>
+        </div>
+      </div>
+      <br />
+      <div>
+        <strong>Segment Length:</strong>
+        <div style="margin-left: 10px;">
+          <label>
+            Distribution:
+            <select id="segmentDistType">
+              <option value="normal">Normal</option>
+              <option value="uniform">Uniform</option>
+              <option value="poisson">Poisson</option>
+            </select>
+          </label>
+          <br />
+          <label>
+            Location (μ/λ):
+            <input id="segmentLoc" type="number" step="0.1" value="0.3" min="0.1" />
+          </label>
+          <br />
+          <label>
+            Scale (σ):
+            <input id="segmentScale" type="number" step="0.1" value="0.1" min="0.01" />
+          </label>
+        </div>
+      </div>
       <br /><br />
       <button id="generateBtn">Generate Tree</button>
       <button id="growBtn">Grow</button>
@@ -64,13 +100,14 @@
         const canvas = document.getElementById("treeCanvas");
         const ctx = canvas.getContext("2d");
         const seedInput = document.getElementById("seedInput");
-        const straightnessValue = document.getElementById("straightnessValue");
-        const increaseStraightnessBtn = document.getElementById("increaseStraightness");
-        const decreaseStraightnessBtn = document.getElementById("decreaseStraightness");
+        const straightnessDistType = document.getElementById("straightnessDistType");
+        const straightnessLoc = document.getElementById("straightnessLoc");
+        const straightnessScale = document.getElementById("straightnessScale");
+        const segmentDistType = document.getElementById("segmentDistType");
+        const segmentLoc = document.getElementById("segmentLoc");
+        const segmentScale = document.getElementById("segmentScale");
         const generateBtn = document.getElementById("generateBtn");
         const growBtn = document.getElementById("growBtn");
-
-        let straightness = 2;
         let tree = null;
         let isGrowing = false;
         let growInterval = null;
@@ -84,14 +121,35 @@
         window.addEventListener("resize", resizeCanvas);
         resizeCanvas();
 
-        function generateTree(seed, straightness) {
-            // Call Rust function
-            const tree = generate(seed, 1, 0.3, straightness);
-            console.log("Rust generate:", tree);
-            return tree;
+        function createDistributionParams(distType, loc, scale) {
+            return { dist_type: distType, loc, scale };
         }
 
-        function drawTree(tree, seed, straightness) {
+        function generateTree(seed) {
+            try {
+                // Get distribution parameters
+                const straightnessParams = createDistributionParams(
+                    straightnessDistType.value,
+                    parseFloat(straightnessLoc.value),
+                    parseFloat(straightnessScale.value)
+                );
+                const segmentParams = createDistributionParams(
+                    segmentDistType.value,
+                    parseFloat(segmentLoc.value),
+                    parseFloat(segmentScale.value)
+                );
+                
+                // Call Rust function with distribution parameters
+                const tree = generate(seed, segmentParams, straightnessParams);
+                console.log("Rust generate:", tree);
+                return tree;
+            } catch (error) {
+                console.error("Error generating tree:", error);
+                throw error;
+            }
+        }
+
+        function drawTree(tree) {
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -125,7 +183,7 @@
             }
             growInterval = setInterval(() => {
               tree.grow();
-              drawTree(tree, seed, straightness);
+              drawTree(tree);
             }, GROW_INTERVAL_MS);
           } else {
             if (growInterval) {
@@ -137,25 +195,27 @@
 
         growBtn.addEventListener("click", toggleGrow);
 
-        increaseStraightnessBtn.addEventListener("click", () => {
-          straightness++;
-          straightnessValue.textContent = straightness;
-        });
 
-        decreaseStraightnessBtn.addEventListener("click", () => {
-          straightness = Math.max(0, straightness - 1);
-          straightnessValue.textContent = straightness;
-        });
 
         generateBtn.addEventListener("click", () => {
-          const seed = parseInt(seedInput.value, 10) || 0;
-          tree = generateTree(seed, straightness);
-          drawTree(tree, seed, straightness);
+          try {
+            const seed = parseInt(seedInput.value, 10) || 0;
+            tree = generateTree(seed);
+            drawTree(tree);
+          } catch (error) {
+            console.error("Error generating tree:", error);
+            alert(`Error generating tree: ${error.message}`);
+          }
         });
 
         // Initial draw
-        tree = generateTree(parseInt(seedInput.value, 10), straightness);
-        drawTree(tree, parseInt(seedInput.value, 10), straightness);
+        try {
+            tree = generateTree(parseInt(seedInput.value, 10));
+            drawTree(tree);
+        } catch (error) {
+            console.error("Error in initial tree generation:", error);
+        }
+        drawTree(tree);
       }
 
       // Clean up interval when page unloads

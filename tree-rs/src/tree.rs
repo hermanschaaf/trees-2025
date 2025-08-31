@@ -1,6 +1,7 @@
 use micromath::{vector::Vector3d, Quaternion};
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand_distr::{Normal, Uniform, Poisson};
 
 // ----- Branch -----
 
@@ -31,24 +32,38 @@ impl Branch {
     }
 }
 
-// ----- Tree -----
+#[derive(Debug)]
+#[derive(Clone, Copy)]
+pub enum DistributionFamily {
+    Normal,
+    Uniform,
+    Poisson,
+}
 
 #[derive(Debug)]
+#[derive(Clone, Copy)]
+pub struct Distribution {
+    pub family: DistributionFamily,
+    pub location: f32, // for Normal a.k.a. mean, µ
+    pub scale: f32, // for Normal a.k.a. standard deviation, σ
+}
+
+// ----- Tree -----
+
+
 pub struct Tree {
     pub seed: u32,
-    pub age: f32,
-    pub segment_length: f32,
-    pub straightness_priority: f32,
+    pub segment_length: Distribution,
+    pub straightness_priority: Distribution,
     pub branches: Vec<Branch>,
     pub root: usize,  // Index of the root branch
     pub rng: StdRng,
 }
 
 impl Tree {
-    pub fn new(seed: u32, age: f32, segment_length: f32, straightness_priority: f32) -> Tree {
+    pub fn new(seed: u32, segment_length: Distribution, straightness_priority: Distribution) -> Tree {
         let mut tree = Tree {
             seed,
-            age,
             segment_length,
             straightness_priority,
             branches: Vec::new(),
@@ -60,7 +75,6 @@ impl Tree {
     }
 
     pub fn grow(&mut self, amount: f32) {
-        self.age += amount;
         if !self.branches.is_empty() {
             self.grow_branch(self.root, amount);
         }
@@ -72,6 +86,7 @@ impl Tree {
         }
         let branches_len = self.branches.len();
         let min_child_counter = self.branches[branch_idx].children.iter().map(|&child_idx| self.branches[child_idx].counter).min().unwrap_or(0);
+        let _segment_length = self.sample_segment_length();
         let branch = &mut self.branches[branch_idx];
         if !branch.children.is_empty() {
             let should_grow = min_child_counter == branch.counter;
@@ -94,7 +109,7 @@ impl Tree {
                 let available_to_branch = (amount - used) * p / total_priority;
                 self.grow_branch(child_idx, available_to_branch);
             }
-        } else if branch.length < self.segment_length {
+        } else if branch.length < _segment_length {
             // This is a terminal branch: lengthen it
             branch.length += amount * 0.1; //  / (std::f32::consts::PI * branch.radius * branch.radius);
         } else {
@@ -110,7 +125,7 @@ impl Tree {
             let direction_b = direction * Quaternion::new(1.0, 0.0, 0.0, v);
 
             // Create new branches
-            let new_branch_a = Branch::new(branches_len, direction_a, 0.0, 0.01, self.straightness_priority, Some(branch_idx));
+            let new_branch_a = Branch::new(branches_len, direction_a, 0.0, 0.01, self.sample_straightness_priority(), Some(branch_idx));
             let new_branch_b = Branch::new(branches_len + 1, direction_b, 0.0, 0.01, 1.0, Some(branch_idx));
             
             // Add new branches to the tree and get their indices
@@ -137,5 +152,24 @@ impl Tree {
     pub fn branch_end(&self, branch_idx: usize) -> Vector3d<f32> {
         let branch = &self.branches[branch_idx];
         self.branch_start(branch_idx) + branch.direction * Vector3d{ x: 0.0, y: branch.length, z: 0.0 }
+    }
+
+
+    fn sample(&mut self, dist: &Distribution) -> f32 {
+        match dist.family {
+            DistributionFamily::Normal => self.rng.sample(&Normal::new(dist.location, dist.scale).unwrap()),
+            DistributionFamily::Uniform => self.rng.sample(&Uniform::new(dist.location - dist.scale, dist.location + dist.scale).unwrap()),
+            DistributionFamily::Poisson => self.rng.sample(&Poisson::new(dist.location).unwrap()),
+        }
+    }
+
+    fn sample_segment_length(&mut self) -> f32 {
+        let segment_length = self.segment_length;
+        self.sample(&segment_length)
+    }
+
+    fn sample_straightness_priority(&mut self) -> f32 {
+        let straightness_priority = self.straightness_priority;
+        self.sample(&straightness_priority)
     }
 }
