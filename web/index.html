@@ -84,6 +84,30 @@
           </label>
         </div>
       </div>
+      <br />
+      <div>
+        <strong>Angle:</strong>
+        <div style="margin-left: 10px;">
+          <label>
+            Distribution:
+            <select id="angleDistType">
+              <option value="normal">Normal</option>
+              <option value="uniform">Uniform</option>
+              <option value="poisson">Poisson</option>
+            </select>
+          </label>
+          <br />
+          <label>
+            Location (μ/λ):
+            <input id="angleLoc" type="number" step="0.1" value="0.3" min="0.1" />
+          </label>
+          <br />
+          <label>
+            Scale (σ):
+            <input id="angleScale" type="number" step="0.1" value="0.1" min="0.01" />
+          </label>
+        </div>
+      </div>
       <br /><br />
       <button id="generateBtn">Generate Tree</button>
       <button id="growBtn">Grow</button>
@@ -106,6 +130,9 @@
         const segmentDistType = document.getElementById("segmentDistType");
         const segmentLoc = document.getElementById("segmentLoc");
         const segmentScale = document.getElementById("segmentScale");
+        const angleDistType = document.getElementById("angleDistType");
+        const angleLoc = document.getElementById("angleLoc");
+        const angleScale = document.getElementById("angleScale");
         const generateBtn = document.getElementById("generateBtn");
         const growBtn = document.getElementById("growBtn");
         let tree = null;
@@ -138,9 +165,14 @@
                     parseFloat(segmentLoc.value),
                     parseFloat(segmentScale.value)
                 );
+                const angleParams = createDistributionParams(
+                    angleDistType.value,
+                    parseFloat(angleLoc.value),
+                    parseFloat(angleScale.value)
+                );
                 
                 // Call Rust function with distribution parameters
-                const tree = generate(seed, segmentParams, straightnessParams);
+                const tree = generate(seed, segmentParams, straightnessParams, angleParams);
                 console.log("Rust generate:", tree);
                 return tree;
             } catch (error) {
@@ -179,7 +211,7 @@
           if (isGrowing) {
             const seed = parseInt(seedInput.value, 10) || 0;
             if (!tree) {
-              tree = generateTree(seed, straightness);
+              tree = generateTree(seed);
             }
             growInterval = setInterval(() => {
               tree.grow();

@@ -24,16 +24,19 @@ pub struct Branch {
 #[wasm_bindgen]
 impl TreeObject {
     #[wasm_bindgen(constructor)]
-    pub fn new(seed: u32, segment_params: JsValue, straightness_params: JsValue) -> Result<TreeObject, JsValue> {
+    pub fn new(seed: u32, segment_params: JsValue, straightness_params: JsValue, angle_params: JsValue) -> Result<TreeObject, JsValue> {
         let segment_params: DistributionParams = from_value(segment_params)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse segment_params: {}", e)))?;
         let straightness_params: DistributionParams = from_value(straightness_params)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse straightness_params: {}", e)))?;
+        let angle_params: DistributionParams = from_value(angle_params)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse angle_params: {}", e)))?;
 
         let segment_dist = convert_to_distribution(segment_params)?;
         let straightness_dist = convert_to_distribution(straightness_params)?;
+        let angle_dist = convert_to_distribution(angle_params)?;
 
-        let tree = tree::Tree::new(seed, segment_dist, straightness_dist);
+        let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist);
         Ok(TreeObject { seed: tree.seed, tree })
     }
 
@@ -88,16 +91,19 @@ impl DistributionParams {
 
 // Public API: generate a Tree
 #[wasm_bindgen]
-pub fn generate(seed: u32, segment_params: JsValue, straightness_params: JsValue) -> Result<TreeObject, JsValue> {
+pub fn generate(seed: u32, segment_params: JsValue, straightness_params: JsValue, angle_params: JsValue) -> Result<TreeObject, JsValue> {
     let segment_params: DistributionParams = from_value(segment_params)
         .map_err(|e| JsValue::from_str(&format!("Failed to parse segment_params: {}", e)))?;
     let straightness_params: DistributionParams = from_value(straightness_params)
         .map_err(|e| JsValue::from_str(&format!("Failed to parse straightness_params: {}", e)))?;
+    let angle_params: DistributionParams = from_value(angle_params)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse angle_params: {}", e)))?;
 
     let segment_dist = convert_to_distribution(segment_params)?;
     let straightness_dist = convert_to_distribution(straightness_params)?;
+    let angle_dist = convert_to_distribution(angle_params)?;
 
-    let tree = tree::Tree::new(seed, segment_dist, straightness_dist);
+    let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist);
     Ok(TreeObject { seed: tree.seed, tree })
 }
 
@@ -136,12 +142,18 @@ mod tests {
             loc: 2.0,
             scale: 0.5,
         };
+        let angle_params = DistributionParams {
+            dist_type: "normal".to_string(),
+            loc: 0.3,
+            scale: 0.1,
+        };
         
         // Convert to JsValue for the test
         let segment_js = JsValue::from_serde(&segment_params).unwrap();
         let straightness_js = JsValue::from_serde(&straightness_params).unwrap();
+        let angle_js = JsValue::from_serde(&angle_params).unwrap();
         
-        let t = generate(123, segment_js, straightness_js).unwrap();
+        let t = generate(123, segment_js, straightness_js, angle_js).unwrap();
         assert_eq!(t.seed, 123);
     }
 }

@@ -55,17 +55,19 @@ pub struct Tree {
     pub seed: u32,
     pub segment_length: Distribution,
     pub straightness_priority: Distribution,
+    pub angle: Distribution,
     pub branches: Vec<Branch>,
     pub root: usize,  // Index of the root branch
     pub rng: StdRng,
 }
 
 impl Tree {
-    pub fn new(seed: u32, segment_length: Distribution, straightness_priority: Distribution) -> Tree {
+    pub fn new(seed: u32, segment_length: Distribution, straightness_priority: Distribution, angle: Distribution) -> Tree {
         let mut tree = Tree {
             seed,
             segment_length,
             straightness_priority,
+            angle,
             branches: Vec::new(),
             root: 0,
             rng: StdRng::seed_from_u64(seed as u64),
@@ -87,6 +89,8 @@ impl Tree {
         let branches_len = self.branches.len();
         let min_child_counter = self.branches[branch_idx].children.iter().map(|&child_idx| self.branches[child_idx].counter).min().unwrap_or(0);
         let _segment_length = self.sample_segment_length();
+        let sampled_angle = self.sample_angle();
+        let sampled_straightness = self.sample_straightness_priority();
         let branch = &mut self.branches[branch_idx];
         if !branch.children.is_empty() {
             let should_grow = min_child_counter == branch.counter;
@@ -118,14 +122,14 @@ impl Tree {
             
             let direction_a = direction * Quaternion::new(1.0, 0.0, 0.0, 0.0);
             let r: f32 = self.rng.random();
-            let mut v = 0.3;
+            let mut v = sampled_angle;
             if r < 0.5 {
              v = -v;
             }
             let direction_b = direction * Quaternion::new(1.0, 0.0, 0.0, v);
 
             // Create new branches
-            let new_branch_a = Branch::new(branches_len, direction_a, 0.0, 0.01, self.sample_straightness_priority(), Some(branch_idx));
+            let new_branch_a = Branch::new(branches_len, direction_a, 0.0, 0.01, sampled_straightness, Some(branch_idx));
             let new_branch_b = Branch::new(branches_len + 1, direction_b, 0.0, 0.01, 1.0, Some(branch_idx));
             
             // Add new branches to the tree and get their indices
@@ -171,5 +175,10 @@ impl Tree {
     fn sample_straightness_priority(&mut self) -> f32 {
         let straightness_priority = self.straightness_priority;
         self.sample(&straightness_priority)
+    }
+
+    fn sample_angle(&mut self) -> f32 {
+        let angle = self.angle;
+        self.sample(&angle)
     }
 }
