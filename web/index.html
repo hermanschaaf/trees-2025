@@ -191,6 +191,7 @@
             const offsetX = canvas.width / 2;
             const offsetY = canvas.height - padding;
 
+            const maxHeight = Math.max(...branches.map(branch => branch.counter));
             for (let i = 0; i < branches.length; i++) {
                 const branch = branches[i];
                 const length = branch.length;
@@ -198,7 +199,13 @@
                 ctx.beginPath();
                 ctx.moveTo(offsetX + branch.start.x * meterToPixel, offsetY - branch.start.y * meterToPixel);
                 ctx.lineTo(offsetX + branch.end.x * meterToPixel, offsetY - branch.end.y * meterToPixel);
-                ctx.strokeStyle = "black";
+                
+                const normalizedHeight = Math.min(branch.counter / maxHeight, 1.0);
+                const hue = 30 + (120 - 30) * normalizedHeight;
+                const saturation = 70 + 30 * normalizedHeight;
+                const lightness = 30 + 20 * (1 - normalizedHeight);
+                
+                ctx.strokeStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
                 ctx.lineWidth = radius * meterToPixel;
                 ctx.stroke();
             }

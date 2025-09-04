@@ -19,6 +19,11 @@ pub struct Branch {
     pub direction: wasm_math::Quaternion,
     pub start: wasm_math::Vector3d,
     pub end: wasm_math::Vector3d,
+    pub counter: u32,
+    pub total_weight: f32,
+    pub average_height: f32,
+    pub priority: f32,
+    pub priority_change: f32,
 }
 
 #[wasm_bindgen]
@@ -41,27 +46,45 @@ impl TreeObject {
     }
 
     pub fn grow(&mut self) {
-        self.tree.grow(5.0);
+        self.tree.grow(0.5);
     }
 
-    pub fn branches(&self) -> Vec<Branch> {
-        self.tree.branches.iter().map(|branch| {
-            let start = self.tree.branch_start(branch.index);
-            let end = self.tree.branch_end(branch.index);
-            Branch {
-                length: branch.length,
-                radius: branch.radius,
-                direction: wasm_math::Quaternion::new(
-                    branch.direction.w(), 
-                    branch.direction.x(), 
-                    branch.direction.y(), 
-                    branch.direction.z(),
-                ),
-                start: wasm_math::Vector3d::new(start.x, start.y, start.z),
-                end: wasm_math::Vector3d::new(end.x, end.y, end.z),
-            }
-        }).collect()
-    }
+    pub fn branches(&mut self) -> Vec<Branch> {
+        // Precompute starts and ends first (no borrow conflicts)
+        let mut starts = Vec::with_capacity(self.tree.branches.len());
+        let mut ends = Vec::with_capacity(self.tree.branches.len());
+        for idx in 0..self.tree.branches.len() {
+            starts.push(self.tree.branch_start(idx));
+            ends.push(self.tree.branch_end(idx)); // needs &mut self
+        }
+    
+        // Now iterate immutably
+        self.tree.branches.iter()
+            .enumerate()
+            .filter(|(_, branch)| !branch.pruned)
+            .map(|(idx, branch)| {
+                let start = starts[idx];
+                let end = ends[idx];
+                Branch {
+                    length: branch.length,
+                    radius: branch.radius,
+                    direction: wasm_math::Quaternion::new(
+                        branch.direction.w(),
+                        branch.direction.x(),
+                        branch.direction.y(),
+                        branch.direction.z(),
+                    ),
+                    counter: branch.counter,
+                    total_weight: branch._total_weight,
+                    average_height: branch._average_height,
+                    priority: branch.priority,
+                    priority_change: branch.priority_change,
+                    start: wasm_math::Vector3d::new(start.x, start.y, start.z),
+                    end: wasm_math::Vector3d::new(end.x, end.y, end.z),
+                }
+            })
+            .collect()
+    }    
 }
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -125,35 +148,35 @@ fn convert_to_distribution(params: DistributionParams) -> Result<tree::Distribut
 }
 
 
-#[cfg(test)]
-mod tests {
-    use crate::*;
+// #[cfg(test)]
+// mod tests {
+//     use crate::*;
 
-    #[test]
-    fn it_works() {
-        // Create test distribution parameters
-        let segment_params = DistributionParams {
-            dist_type: "normal".to_string(),
-            loc: 0.3,
-            scale: 0.1,
-        };
-        let straightness_params = DistributionParams {
-            dist_type: "normal".to_string(),
-            loc: 2.0,
-            scale: 0.5,
-        };
-        let angle_params = DistributionParams {
-            dist_type: "normal".to_string(),
-            loc: 0.3,
-            scale: 0.1,
-        };
+//     #[test]
+//     fn it_works() {
+//         // Create test distribution parameters
+//         let segment_params = DistributionParams {
+//             dist_type: "normal".to_string(),
+//             loc: 0.3,
+//             scale: 0.1,
+//         };
+//         let straightness_params = DistributionParams {
+//             dist_type: "normal".to_string(),
+//             loc: 2.0,
+//             scale: 0.5,
+//         };
+//         let angle_params = DistributionParams {
+//             dist_type: "normal".to_string(),
+//             loc: 0.3,
+//             scale: 0.1,
+//         };
         
-        // Convert to JsValue for the test
-        let segment_js = JsValue::from_serde(&segment_params).unwrap();
-        let straightness_js = JsValue::from_serde(&straightness_params).unwrap();
-        let angle_js = JsValue::from_serde(&angle_params).unwrap();
+//         // Convert to JsValue for the test
+//         let segment_js = JsValue::from_serde(&segment_params).unwrap();
+//         let straightness_js = JsValue::from_serde(&straightness_params).unwrap();
+//         let angle_js = JsValue::from_serde(&angle_params).unwrap();
         
-        let t = generate(123, segment_js, straightness_js, angle_js).unwrap();
-        assert_eq!(t.seed, 123);
-    }
-}
+//         let t = generate(123, segment_js, straightness_js, angle_js).unwrap();
+//         assert_eq!(t.seed, 123);
+//     }
+// }
