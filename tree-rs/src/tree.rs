@@ -270,94 +270,136 @@ impl Tree {
             }
         }
     }
-
     fn grow_branch(&mut self, branch_idx: usize, amount: f32) -> f32 {
-        // if amount < 0.001 {
-        //     self.branches[branch_idx].counter += 1;
-        //     return amount;
-        // }
         let mut used = 0.0;
-        let children: Vec<usize> = self.branches[branch_idx].children.iter().copied().filter(|&child_idx| !self.branches[child_idx].pruned).collect();
-        let min_child_counter = children.iter().map(|&child_idx| self.branches[child_idx].counter).min().unwrap_or(0);
+    
+        // Precompute values that require shared access
+        let children: Vec<usize> = self.branches[branch_idx]
+            .children
+            .iter()
+            .copied()
+            .filter(|&child_idx| !self.branches[child_idx].pruned)
+            .collect();
+    
+        let min_child_counter = children
+            .iter()
+            .map(|&child_idx| self.branches[child_idx].counter)
+            .min()
+            .unwrap_or(0);
+    
+        let parent_idx_opt = self.branches[branch_idx].parent;
         let sampled_segment_length = self.sample_segment_length();
         let sampled_angle_a = self.sample_angle();
         let sampled_straightness = self.sample_straightness_priority();
-        let parent_counter = {
-            let has_parent = self.branches[branch_idx].parent.is_some();
-            if has_parent {
-                i64::from(self.branches[self.branches[branch_idx].parent.unwrap()].counter)
-            } else {
-                -1
-            }
+    
+        let parent_area = if let Some(parent_idx) = parent_idx_opt {
+            Some(std::f32::consts::PI * self.branches[parent_idx].radius.powi(2))
+        } else {
+            None
         };
+        let parent_counter = parent_idx_opt
+            .map(|p| i64::from(self.branches[p].counter))
+            .unwrap_or(-1);
+    
         let relative_priority = self.branch_relative_priority(branch_idx);
+    
+        // Now we can mutably borrow the branch
         let branch = &mut self.branches[branch_idx];
-        let should_grow = (min_child_counter == 0 || min_child_counter >= branch.counter) && (parent_counter > i64::from(branch.counter) || parent_counter == -1);
+    
+    
+        let should_grow = (min_child_counter == 0 || min_child_counter >= branch.counter)
+            && (parent_counter > i64::from(branch.counter) || parent_counter == -1);
+    
         if should_grow {
             branch.counter += 1;
         }
+    
         if !children.is_empty() {
             if should_grow {
-                // Widen this branch
-                let r2 = branch.radius + BARK_TO_GROWTH_RATIO * amount * relative_priority;
-                let r1 = branch.radius;
-                used = std::f32::consts::PI * (r2 * r2 - r1 * r1) * branch.length;
-                branch.radius = r2;
+                if let Some(parent_area) = parent_area {
+                    let r2 = (parent_area * relative_priority).sqrt() / std::f32::consts::PI;
+                    let r1 = branch.radius;
+                    used = std::f32::consts::PI * (r2 * r2 - r1 * r1) * branch.length;
+                    branch.radius = r2;
+                } else {
+                    let r2 = branch.radius + BARK_TO_GROWTH_RATIO * amount * relative_priority;
+                    let r1 = branch.radius;
+                    used = std::f32::consts::PI * (r2 * r2 - r1 * r1) * branch.length;
+                    branch.radius = r2;
+                }
             }
-            let total_priority: f32 = children.iter().map(|&child_idx| self.branches[child_idx].priority).sum();
-            // let available_per_child = (amount - used) / children.len() as f32;
+    
+            // Drop the mutable borrow of branch before recursing
+            let total_priority: f32 = children
+                .iter()
+                .map(|&child_idx| self.branches[child_idx].priority)
+                .sum();
+    
             for &child_idx in &children {
                 let p = self.branches[child_idx].priority;
                 let available_to_branch = (amount - used) * p / total_priority;
                 used += self.grow_branch(child_idx, available_to_branch);
             }
         } else if branch.previously_split {
-            // This branch has already been split: only widen it
-            // branch.length += amount * 0.1;
-            // branch.radius += 0.01;
-            // branch.counter += 1;
+            // Already split, only widen
         } else if branch.length < sampled_segment_length && should_grow {
-            // This is a terminal branch: lengthen it
             let max_growth = sampled_segment_length - branch.length;
             used = f32::min(amount, max_growth);
             branch.length += used;
         } else if branch.depth < self.max_depth && should_grow {
-            // Split this branch into two
+            // Branch splitting logic
             let direction: Quaternion = branch.direction;
-            
+    
             let r: f32 = self.rng.random();
             let mut v = sampled_angle_a;
             if r < 0.5 {
-             v = -v
+                v = -v;
             }
-            let direction_a = direction * Quaternion::new(1.0, 0.0, 0.0, 0.0 );
+            let direction_a = direction * Quaternion::new(1.0, 0.0, 0.0, 0.0);
             let direction_b = direction * Quaternion::new(1.0, 0.0, 0.0, v);
-
-            // Create new branches with counter one less than parent to ensure they're always behind
+    
             let child_counter = branch.counter.saturating_sub(1);
-            let new_branch_a = Branch::new(direction_a, 0.0, 0.001, branch.depth, child_counter, sampled_straightness, Some(branch_idx));
-            let new_branch_b = Branch::new(direction_b, 0.0, 0.001, branch.depth + 1, child_counter, 1.0, Some(branch_idx));
-            
-            // Add new branches to the tree and get their indices
+            let new_branch_a = Branch::new(
+                direction_a,
+                0.0,
+                0.001,
+                branch.depth,
+                child_counter,
+                sampled_straightness,
+                Some(branch_idx),
+            );
+            let new_branch_b = Branch::new(
+                direction_b,
+                0.0,
+                0.001,
+                branch.depth + 1,
+                child_counter,
+                1.0,
+                Some(branch_idx),
+            );
+    
             let new_idx_a = self.branches.len();
             self.branches.push(new_branch_a);
             let new_idx_b = self.branches.len();
             self.branches.push(new_branch_b);
-            
-            // Update children of current branch
-            // We need to get the branch again to avoid multiple mutable borrows
-            let parent = &mut self.branches[branch_idx];
-            parent.children.push(new_idx_a);
-            parent.children.push(new_idx_b);
-            parent.previously_split = true;
+    
+            // Mutably borrow branch again to update its children
+            {
+                let parent = &mut self.branches[branch_idx];
+                parent.children.push(new_idx_a);
+                parent.children.push(new_idx_b);
+                parent.previously_split = true;
+            }
+    
             used += self.grow_branch(new_idx_a, amount * 0.5);
             used += self.grow_branch(new_idx_b, amount * 0.5);
         } else if should_grow {
             branch.previously_split = true; // prevent further growth
-            // branch.previously_split = true; // Mark this branch as previously split to prevent further growth
         }
+    
         used
     }
+    
 
     pub fn branch_relative_priority(&self, branch_idx: usize) -> f32 {
         let parent = self.branches[branch_idx].parent;
