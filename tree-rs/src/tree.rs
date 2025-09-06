@@ -7,6 +7,9 @@ use rand_distr::{Normal, Uniform, Poisson};
 
 // ----- Branch -----
 
+const PRUNE_HEIGHT_THRESHOLD: f32 = 0.50;
+const BARK_TO_GROWTH_RATIO: f32 = 0.00001;
+
 #[derive(Debug)]
 pub struct Branch {
     pub length: f32,
@@ -111,7 +114,7 @@ impl Tree {
         }
         self.growth += amount;
         self.recalculate_values();
-        self.update_priorities();
+        // self.update_priorities();
         if self.growth > 3.0 {
             self.prune();
             self.growth = 0.0;
@@ -236,7 +239,7 @@ impl Tree {
             // select children for pruning based on the two conditions
             for &child_idx in &parent.children {
                 let child = &self.branches[child_idx];
-                if child._branch_end.y < max_height * 0.5 && child.depth > min_depth {
+                if child._branch_end.y < max_height * PRUNE_HEIGHT_THRESHOLD && child.depth > min_depth {
                     initial_to_prune.push(child_idx);
                 }
             }
@@ -269,16 +272,16 @@ impl Tree {
     }
 
     fn grow_branch(&mut self, branch_idx: usize, amount: f32) -> f32 {
-        if amount < 0.001 {
-            return 0.0;
-        }
+        // if amount < 0.001 {
+        //     self.branches[branch_idx].counter += 1;
+        //     return amount;
+        // }
         let mut used = 0.0;
-        let min_child_counter = self.branches[branch_idx].children.iter().map(|&child_idx| self.branches[child_idx].counter).min().unwrap_or(0);
+        let children: Vec<usize> = self.branches[branch_idx].children.iter().copied().filter(|&child_idx| !self.branches[child_idx].pruned).collect();
+        let min_child_counter = children.iter().map(|&child_idx| self.branches[child_idx].counter).min().unwrap_or(0);
         let sampled_segment_length = self.sample_segment_length();
         let sampled_angle_a = self.sample_angle();
         let sampled_straightness = self.sample_straightness_priority();
-        let children: Vec<usize> = self.branches[branch_idx].children.iter().copied().collect();
-        let children_pruned = children.iter().all(|&child_idx| self.branches[child_idx].pruned);
         let parent_counter = {
             let has_parent = self.branches[branch_idx].parent.is_some();
             if has_parent {
@@ -287,15 +290,19 @@ impl Tree {
                 -1
             }
         };
+        let relative_priority = self.branch_relative_priority(branch_idx);
         let branch = &mut self.branches[branch_idx];
-        if !branch.children.is_empty() && !children_pruned {
-            if min_child_counter >= branch.counter && (parent_counter > i64::from(branch.counter) || parent_counter == -1) {
-                // Widen this branch, and grow children
-                let r2 = branch.radius + 0.00005;
+        let should_grow = (min_child_counter == 0 || min_child_counter >= branch.counter) && (parent_counter > i64::from(branch.counter) || parent_counter == -1);
+        if should_grow {
+            branch.counter += 1;
+        }
+        if !children.is_empty() {
+            if should_grow {
+                // Widen this branch
+                let r2 = branch.radius + BARK_TO_GROWTH_RATIO * amount * relative_priority;
                 let r1 = branch.radius;
                 used = std::f32::consts::PI * (r2 * r2 - r1 * r1) * branch.length;
                 branch.radius = r2;
-                branch.counter += 1;
             }
             let total_priority: f32 = children.iter().map(|&child_idx| self.branches[child_idx].priority).sum();
             // let available_per_child = (amount - used) / children.len() as f32;
@@ -309,12 +316,12 @@ impl Tree {
             // branch.length += amount * 0.1;
             // branch.radius += 0.01;
             // branch.counter += 1;
-        } else if branch.length < sampled_segment_length {
+        } else if branch.length < sampled_segment_length && should_grow {
             // This is a terminal branch: lengthen it
-            used = f32::min(amount, 0.01);
-            branch.length += used; //  / (std::f32::consts::PI * branch.radius * branch.radius);
-            branch.counter += 1;
-        } else if branch.depth < self.max_depth {
+            let max_growth = sampled_segment_length - branch.length;
+            used = f32::min(amount, max_growth);
+            branch.length += used;
+        } else if branch.depth < self.max_depth && should_grow {
             // Split this branch into two
             let direction: Quaternion = branch.direction;
             
@@ -328,8 +335,8 @@ impl Tree {
 
             // Create new branches with counter one less than parent to ensure they're always behind
             let child_counter = branch.counter.saturating_sub(1);
-            let new_branch_a = Branch::new(direction_a, 0.0, 0.01, branch.depth, child_counter, sampled_straightness, Some(branch_idx));
-            let new_branch_b = Branch::new(direction_b, 0.0, 0.01, branch.depth + 1, child_counter, 1.0, Some(branch_idx));
+            let new_branch_a = Branch::new(direction_a, 0.0, 0.001, branch.depth, child_counter, sampled_straightness, Some(branch_idx));
+            let new_branch_b = Branch::new(direction_b, 0.0, 0.001, branch.depth + 1, child_counter, 1.0, Some(branch_idx));
             
             // Add new branches to the tree and get their indices
             let new_idx_a = self.branches.len();
@@ -343,14 +350,22 @@ impl Tree {
             parent.children.push(new_idx_a);
             parent.children.push(new_idx_b);
             parent.previously_split = true;
-            // Increment the parent's counter to ensure children have a lower counter
-            parent.counter += 1;
             used += self.grow_branch(new_idx_a, amount * 0.5);
             used += self.grow_branch(new_idx_b, amount * 0.5);
-        } else {
-            branch.previously_split = true; // Mark this branch as previously split to prevent further growth
+        } else if should_grow {
+            branch.previously_split = true; // prevent further growth
+            // branch.previously_split = true; // Mark this branch as previously split to prevent further growth
         }
         used
+    }
+
+    pub fn branch_relative_priority(&self, branch_idx: usize) -> f32 {
+        let parent = self.branches[branch_idx].parent;
+        if parent.is_none() {
+            return 1.0;
+        }
+        let total_priority: f32 = self.branches[parent.unwrap()].children.iter().map(|&child_idx| self.branches[child_idx].priority).sum();
+        self.branches[branch_idx].priority / total_priority
     }
 
     pub fn branch_start(&mut self, branch_idx: usize) -> Vector3d<f32> {

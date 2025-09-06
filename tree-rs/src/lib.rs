@@ -42,12 +42,14 @@ impl TreeObject {
         let straightness_dist = convert_to_distribution(straightness_params)?;
         let angle_dist = convert_to_distribution(angle_params)?;
 
-        let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist, 5);
+        let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist, 4);
         Ok(TreeObject { seed: tree.seed, tree })
     }
 
     pub fn grow(&mut self) {
-        self.tree.grow(0.5);
+        // let mut growth = 0.5;
+        // growth = self.tree.branches[0]._total_weight * 10000.0;
+        self.tree.grow(0.01 * ((self.tree.branches[0].counter as f32) + 1.0));
     }
 
     pub fn branches(&mut self) -> Vec<Branch> {
@@ -128,7 +130,7 @@ pub fn generate(seed: u32, segment_params: JsValue, straightness_params: JsValue
     let straightness_dist = convert_to_distribution(straightness_params)?;
     let angle_dist = convert_to_distribution(angle_params)?;
 
-    let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist, 4);
+    let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist, 5);
     Ok(TreeObject { seed: tree.seed, tree })
 }
 
