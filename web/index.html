@@ -138,8 +138,18 @@
         let tree = null;
         let isGrowing = false;
         let growInterval = null;
-        const meterToPixel = 100;
+        const meterToPixel = 200;
         const GROW_INTERVAL_MS = 50;
+
+        // Preload the image once
+        const personImg = new Image();
+        personImg.crossOrigin = "anonymous";
+        personImg.src = "/static/images/man.svg";
+
+        personImg.onload = function() {
+          // Start animation only after image is ready
+          requestAnimationFrame(drawAll);
+        };
 
         function resizeCanvas() {
           canvas.width = window.innerWidth;
@@ -181,17 +191,47 @@
             }
         }
 
-        function drawTree(tree) {
-            // Clear canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        function drawAll() {
+          const offCanvas = document.createElement("canvas");
+          offCanvas.width = canvas.width;
+          offCanvas.height = canvas.height;
+          const offCtx = offCanvas.getContext("2d");
 
+          offCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
+
+          drawPersonForScale(offCtx);
+          drawTree(offCtx, tree);
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(offCanvas, 0, 0);
+
+          requestAnimationFrame(drawAll);
+        }
+
+        function drawPersonForScale(ctx) {
+          const padding = 40;
+          const offsetX = canvas.width / 2 + 1.5 * meterToPixel;
+          const offsetY = canvas.height - padding;
+
+          ctx.globalAlpha = 0.5;
+          ctx.drawImage(
+            personImg,
+            offsetX - meterToPixel * 0.5,
+            offsetY - meterToPixel * 1.8,
+            meterToPixel * 0.5,
+            meterToPixel * 1.8
+          );
+          ctx.globalAlpha = 1.0; // reset
+        }
+
+        function drawTree(ctx, tree) {
             const branches = tree.branches();
-            console.log("branches:", branches);
             const padding = 40;
             const offsetX = canvas.width / 2;
             const offsetY = canvas.height - padding;
+            const maxCounter = Math.max(...branches.map(branch => branch.counter));
+            const maxDepth = Math.max(...branches.map(branch => branch.depth));
 
-            const maxHeight = Math.max(...branches.map(branch => branch.counter));
             for (let i = 0; i < branches.length; i++) {
                 const branch = branches[i];
                 const length = branch.length;
@@ -200,14 +240,27 @@
                 ctx.moveTo(offsetX + branch.start.x * meterToPixel, offsetY - branch.start.y * meterToPixel);
                 ctx.lineTo(offsetX + branch.end.x * meterToPixel, offsetY - branch.end.y * meterToPixel);
                 
-                const normalizedHeight = Math.min(branch.counter / maxHeight, 1.0);
-                const hue = 30 + (120 - 30) * normalizedHeight;
-                const saturation = 70 + 30 * normalizedHeight;
-                const lightness = 30 + 20 * (1 - normalizedHeight);
+                const normalizedCounter = Math.min(branch.counter / maxCounter, 1.0);
+                const normalizedDepth = Math.min(branch.depth / maxDepth, 1.0);
+                const hue = 30 + (120 - 30) * normalizedDepth;
+                const saturation = 70 + 30 * normalizedDepth;
+                const lightness = 30 + 20 * (1 - normalizedDepth);
                 
                 ctx.strokeStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
                 ctx.lineWidth = radius * meterToPixel;
                 ctx.stroke();
+            }
+
+            for (let i = 0; i < branches.length; i++) {
+                const branch = branches[i];
+                const normalizedCounter = Math.min(branch.counter / maxCounter, 1.0);
+                const hue = 30 + (120 - 30) * normalizedCounter;
+                const saturation = 70 + 30 * normalizedCounter;
+                const lightness = 30 + 20 * (1 - normalizedCounter);
+                // draw the branch counter
+                ctx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+                ctx.font = "12px Arial";
+                ctx.fillText(branch.counter.toString(), offsetX + branch.end.x * meterToPixel, offsetY - branch.end.y * meterToPixel);
             }
         }
 
@@ -222,7 +275,6 @@
             }
             growInterval = setInterval(() => {
               tree.grow();
-              drawTree(tree);
             }, GROW_INTERVAL_MS);
           } else {
             if (growInterval) {
@@ -234,13 +286,11 @@
 
         growBtn.addEventListener("click", toggleGrow);
 
-
-
         generateBtn.addEventListener("click", () => {
           try {
             const seed = parseInt(seedInput.value, 10) || 0;
             tree = generateTree(seed);
-            drawTree(tree);
+            // drawAll();
           } catch (error) {
             console.error("Error generating tree:", error);
             alert(`Error generating tree: ${error.message}`);
@@ -250,11 +300,10 @@
         // Initial draw
         try {
             tree = generateTree(parseInt(seedInput.value, 10));
-            drawTree(tree);
+            drawAll();
         } catch (error) {
             console.error("Error in initial tree generation:", error);
         }
-        drawTree(tree);
       }
 
       // Clean up interval when page unloads

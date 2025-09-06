@@ -16,6 +16,7 @@ pub struct TreeObject {
 pub struct Branch {
     pub length: f32,
     pub radius: f32,
+    pub depth: u32,
     pub direction: wasm_math::Quaternion,
     pub start: wasm_math::Vector3d,
     pub end: wasm_math::Vector3d,
@@ -41,7 +42,7 @@ impl TreeObject {
         let straightness_dist = convert_to_distribution(straightness_params)?;
         let angle_dist = convert_to_distribution(angle_params)?;
 
-        let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist);
+        let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist, 5);
         Ok(TreeObject { seed: tree.seed, tree })
     }
 
@@ -66,6 +67,7 @@ impl TreeObject {
                 let start = starts[idx];
                 let end = ends[idx];
                 Branch {
+                    depth: branch.depth,
                     length: branch.length,
                     radius: branch.radius,
                     direction: wasm_math::Quaternion::new(
@@ -126,7 +128,7 @@ pub fn generate(seed: u32, segment_params: JsValue, straightness_params: JsValue
     let straightness_dist = convert_to_distribution(straightness_params)?;
     let angle_dist = convert_to_distribution(angle_params)?;
 
-    let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist);
+    let tree = tree::Tree::new(seed, segment_dist, straightness_dist, angle_dist, 4);
     Ok(TreeObject { seed: tree.seed, tree })
 }
 

@@ -1,4 +1,4 @@
-use std::cmp;
+use std::collections::{HashSet, VecDeque};
 
 use micromath::{vector::Vector3d, Quaternion};
 use rand::{Rng, SeedableRng};
@@ -9,9 +9,9 @@ use rand_distr::{Normal, Uniform, Poisson};
 
 #[derive(Debug)]
 pub struct Branch {
-    pub index: usize,
     pub length: f32,
     pub radius: f32,
+    pub depth: u32,
     pub direction: Quaternion,
     pub parent: Option<usize>,
     pub children: Vec<usize>, // Indices of children in the Tree's branches vector
@@ -28,11 +28,11 @@ pub struct Branch {
 }
 
 impl Branch {
-    pub fn new(index: usize, direction: Quaternion, length: f32, radius: f32, counter: u32, priority: f32, parent: Option<usize>) -> Branch {
+    pub fn new(direction: Quaternion, length: f32, radius: f32, depth: u32, counter: u32, priority: f32, parent: Option<usize>) -> Branch {
         Branch {
-            index,
             length,
             radius,
+            depth,
             direction,
             parent,
             children: Vec::new(),
@@ -73,24 +73,28 @@ pub struct Tree {
     pub seed: u32,
     pub segment_length: Distribution,
     pub straightness_priority: Distribution,
+    pub max_depth: u32,
     pub angle: Distribution,
     pub branches: Vec<Branch>,
     pub root: usize,  // Index of the root branch
     pub rng: StdRng,
+    pub growth: f32,
 }
 
 impl Tree {
-    pub fn new(seed: u32, segment_length: Distribution, straightness_priority: Distribution, angle: Distribution) -> Tree {
+    pub fn new(seed: u32, segment_length: Distribution, straightness_priority: Distribution, angle: Distribution, max_depth: u32) -> Tree {
         let mut tree = Tree {
             seed,
             segment_length,
             straightness_priority,
+            max_depth,
             angle,
             branches: Vec::new(),
             root: 0,
             rng: StdRng::seed_from_u64(seed as u64),
+            growth: 0.0,
         };
-        tree.branches.push(Branch::new(0, Quaternion::new(1.0, 0.0, 0.0, 0.0), 0.1, 0.01,0, 1.0, None));
+        tree.branches.push(Branch::new(Quaternion::new(1.0, 0.0, 0.0, 0.0), 0.1, 0.01, 0, 0, 1.0, None));
         tree
     }
 
@@ -105,9 +109,13 @@ impl Tree {
                 left -= used;
             }
         }
+        self.growth += amount;
         self.recalculate_values();
         self.update_priorities();
-        self.prune();
+        if self.growth > 3.0 {
+            self.prune();
+            self.growth = 0.0;
+        }
     }
 
     fn recalculate_values(&mut self) {
@@ -166,27 +174,24 @@ impl Tree {
     }    
     
     fn update_priorities(&mut self) {
-        let mut height_weight_ratios = Vec::with_capacity(self.branches.len());
+        const TARGET_HEIGHT: f32 = 10.0;
+        let mut heights = Vec::with_capacity(self.branches.len());
     
         // First pass: collect heights using indices (no &self.branches borrow held)
         for idx in 0..self.branches.len() {
-            height_weight_ratios.push(self.branches[idx]._average_height / self.branches[idx]._total_weight);
+            heights.push(self.branches[idx]._average_height);
         }
     
         // Compute median
-        let mut sorted_height_weight_ratios = height_weight_ratios.clone();
-        sorted_height_weight_ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let median_height_weight_ratio = sorted_height_weight_ratios[sorted_height_weight_ratios.len() / 2];
+        let mut sorted_heights = heights.clone();
+        sorted_heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
     
         // Second pass: update priority_change
         for idx in 0..self.branches.len() {
             let branch = &mut self.branches[idx];
             if branch.children.is_empty() {
-                if height_weight_ratios[idx] > median_height_weight_ratio {
-                    branch.priority_change = 0.0;
-                } else {
-                    branch.priority_change = -0.2;
-                }
+                let diff = heights[idx] - TARGET_HEIGHT;
+                branch.priority_change = -diff * 0.1;
             } else {
                 branch.priority_change = 0.0;
             }
@@ -199,23 +204,66 @@ impl Tree {
     }    
 
     fn prune(&mut self) {
-        // First pass: mark branches to prune and collect their indices
-        let branches_to_prune: Vec<_> = self.branches.iter_mut()
-            .filter_map(|branch| {
-                if branch.priority < 0.1 && branch.children.is_empty() {
-                    branch.pruned = true;
-                    Some(branch.index)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        // Prune the child that:
+        //  - has average height below 50% of the max height
+        //  - has lower depth than the other child(ren)
 
-        // Second pass: update parent's children
-        for branch_idx in branches_to_prune {
-            if let Some(parent_idx) = self.branches[branch_idx].parent {
+        let max_height = self
+            .branches
+            .iter()
+            .map(|branch| branch._average_height)
+            .fold(0.0, f32::max);
+    
+        let mut initial_to_prune: Vec<usize> = Vec::new();
+
+        // Step 1: look at children of every branch
+        for parent in &self.branches {
+            if parent.children.is_empty() {
+                continue;
+            }
+            if parent.depth >= 2 {
+                continue;
+            }
+
+            // find minimum depth among siblings
+            let min_depth = parent
+                .children
+                .iter()
+                .map(|&child_idx| self.branches[child_idx].depth)
+                .min()
+                .unwrap();
+
+            // select children for pruning based on the two conditions
+            for &child_idx in &parent.children {
+                let child = &self.branches[child_idx];
+                if child._branch_end.y < max_height * 0.5 && child.depth > min_depth {
+                    initial_to_prune.push(child_idx);
+                }
+            }
+        }
+
+        // Step 2: collect descendants of everything selected
+        let mut all_to_prune: HashSet<usize> = HashSet::new();
+        let mut queue: VecDeque<usize> = initial_to_prune.into();
+
+        while let Some(idx) = queue.pop_front() {
+            if all_to_prune.insert(idx) {
+                for &child_idx in &self.branches[idx].children {
+                    queue.push_back(child_idx);
+                }
+            }
+        }
+
+        // Step 3: mark pruned
+        for &idx in &all_to_prune {
+            self.branches[idx].pruned = true;
+        }
+
+        // Step 4: update parents' children lists
+        for &idx in &all_to_prune {
+            if let Some(parent_idx) = self.branches[idx].parent {
                 let parent = &mut self.branches[parent_idx];
-                parent.children.retain(|&x| x != branch_idx);
+                parent.children.retain(|&x| x != idx);
             }
         }
     }
@@ -225,16 +273,23 @@ impl Tree {
             return 0.0;
         }
         let mut used = 0.0;
-        let branches_len = self.branches.len();
         let min_child_counter = self.branches[branch_idx].children.iter().map(|&child_idx| self.branches[child_idx].counter).min().unwrap_or(0);
         let sampled_segment_length = self.sample_segment_length();
         let sampled_angle_a = self.sample_angle();
         let sampled_straightness = self.sample_straightness_priority();
         let children: Vec<usize> = self.branches[branch_idx].children.iter().copied().collect();
         let children_pruned = children.iter().all(|&child_idx| self.branches[child_idx].pruned);
+        let parent_counter = {
+            let has_parent = self.branches[branch_idx].parent.is_some();
+            if has_parent {
+                i64::from(self.branches[self.branches[branch_idx].parent.unwrap()].counter)
+            } else {
+                -1
+            }
+        };
         let branch = &mut self.branches[branch_idx];
         if !branch.children.is_empty() && !children_pruned {
-            if min_child_counter < branch.counter {
+            if min_child_counter >= branch.counter && (parent_counter > i64::from(branch.counter) || parent_counter == -1) {
                 // Widen this branch, and grow children
                 let r2 = branch.radius + 0.00005;
                 let r1 = branch.radius;
@@ -259,7 +314,7 @@ impl Tree {
             used = f32::min(amount, 0.01);
             branch.length += used; //  / (std::f32::consts::PI * branch.radius * branch.radius);
             branch.counter += 1;
-        } else {
+        } else if branch.depth < self.max_depth {
             // Split this branch into two
             let direction: Quaternion = branch.direction;
             
@@ -268,13 +323,13 @@ impl Tree {
             if r < 0.5 {
              v = -v
             }
-            let direction_a = direction * Quaternion::new(1.0, 0.0, 0.0, -v * 0.2 );
+            let direction_a = direction * Quaternion::new(1.0, 0.0, 0.0, 0.0 );
             let direction_b = direction * Quaternion::new(1.0, 0.0, 0.0, v);
 
             // Create new branches with counter one less than parent to ensure they're always behind
             let child_counter = branch.counter.saturating_sub(1);
-            let new_branch_a = Branch::new(branches_len, direction_a, 0.0, 0.01, child_counter, 1.0, Some(branch_idx));
-            let new_branch_b = Branch::new(branches_len + 1, direction_b, 0.0, 0.01, child_counter, 1.0, Some(branch_idx));
+            let new_branch_a = Branch::new(direction_a, 0.0, 0.01, branch.depth, child_counter, sampled_straightness, Some(branch_idx));
+            let new_branch_b = Branch::new(direction_b, 0.0, 0.01, branch.depth + 1, child_counter, 1.0, Some(branch_idx));
             
             // Add new branches to the tree and get their indices
             let new_idx_a = self.branches.len();
@@ -292,6 +347,8 @@ impl Tree {
             parent.counter += 1;
             used += self.grow_branch(new_idx_a, amount * 0.5);
             used += self.grow_branch(new_idx_b, amount * 0.5);
+        } else {
+            branch.previously_split = true; // Mark this branch as previously split to prevent further growth
         }
         used
     }
