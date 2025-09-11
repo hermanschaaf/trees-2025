@@ -8,7 +8,7 @@ use rand_distr::{Normal, Uniform, Poisson};
 // ----- Branch -----
 
 const PRUNE_HEIGHT_THRESHOLD: f32 = 0.50;
-const BARK_TO_GROWTH_RATIO: f32 = 0.00001;
+const BARK_TO_GROWTH_RATIO: f32 = 0.00002;
 
 #[derive(Debug)]
 pub struct Branch {
@@ -299,7 +299,7 @@ impl Tree {
         if !children.is_empty() {
             if should_grow {
                 // Widen this branch
-                let r2 = branch.radius + BARK_TO_GROWTH_RATIO * amount * relative_priority;
+                let r2 = branch.radius + BARK_TO_GROWTH_RATIO * amount;
                 let r1 = branch.radius;
                 used = std::f32::consts::PI * (r2 * r2 - r1 * r1) * branch.length;
                 branch.radius = r2;
