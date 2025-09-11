@@ -4,7 +4,7 @@ build:
 	cp tree-rs/pkg/tree_rs_bg.wasm web/static/js/
 
 serve:
-	cd web && python3 -m http.server 8000
+	cd web && npx vite
 
 build-and-serve: build serve
 
