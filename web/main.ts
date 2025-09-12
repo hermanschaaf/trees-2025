@@ -44,19 +44,7 @@ const cylinderMaterial = new THREE.MeshPhongMaterial({
     specular: 0x111111
 });
 
-// Function to create ring visualization
-const createRingMesh = (center: {x: number, y: number, z: number}, radius: number) => {
-    const geometry = new THREE.TorusGeometry(radius, 0.05, 8, 16);
-    const mesh = new THREE.Mesh(geometry, ringMaterial);
-    mesh.position.set(center.x, center.y, center.z);
-    // Rotate the torus to be vertical (perpendicular to Y axis)
-    mesh.rotation.x = Math.PI / 2;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    return mesh;
-};
-
-// Create rings from TreeObject
+// Create tree visualization using generated mesh
 const createTreeVisualization = () => {
     // Clear existing meshes
     ringMeshes.forEach(mesh => {
@@ -65,20 +53,60 @@ const createTreeVisualization = () => {
     });
     ringMeshes = [];
     
-    // Create ring meshes
-    const ringCount = tree.rings_count();
-    for (let i = 0; i < ringCount; i++) {
-        const center = tree.ring_center(i);
-        const radius = tree.ring_radius(i);
-        
-        if (center && radius !== null) {
-            const ringMesh = createRingMesh(center, radius);
-            ringMeshes.push(ringMesh);
-            scene.add(ringMesh);
-        }
-    }
+    // Generate mesh from Rust
+    const treeMesh = tree.generate_tree_mesh(16); // 16 points per ring
     
-    console.log(`Created ${ringMeshes.length} ring meshes`);
+    if (treeMesh.vertices.length > 0) {
+        // Create Three.js geometry from the generated mesh
+        const geometry = new THREE.BufferGeometry();
+        
+        // Set vertices (convert flat array to THREE.js format)
+        const vertices = new Float32Array(treeMesh.vertices);
+        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        
+        // Set normals
+        const normals = new Float32Array(treeMesh.normals);
+        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+        
+        // Set UVs
+        const uvs = new Float32Array(treeMesh.uvs);
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        
+        // Set indices
+        const indices = new Uint32Array(treeMesh.indices);
+        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+        
+        // Create mesh
+        const mesh = new THREE.Mesh(geometry, ringMaterial);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        
+        ringMeshes.push(mesh);
+        scene.add(mesh);
+        
+        console.log(`Created tree mesh with ${treeMesh.vertices.length/3} vertices and ${treeMesh.indices.length/3} triangles`);
+    } else {
+        console.log("No mesh data generated - falling back to simple visualization");
+
+        // Fallback: Create simple ring visualization
+        const ringCount = tree.rings_count();
+        for (let i = 0; i < ringCount; i++) {
+            const center = tree.ring_center(i);
+            const radius = tree.ring_radius(i);
+
+            if (center && radius !== null) {
+                const geometry = new THREE.TorusGeometry(radius, 0.05, 8, 16);
+                const mesh = new THREE.Mesh(geometry, ringMaterial);
+                mesh.position.set(center.x, center.y, center.z);
+                mesh.rotation.x = Math.PI / 2;
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                ringMeshes.push(mesh);
+                scene.add(mesh);
+            }
+        }
+        console.log(`Created ${ringMeshes.length} fallback ring meshes`);
+    }
 };
 
 // Create initial tree visualization

@@ -25,6 +25,37 @@ pub struct Branch {
 }
 
 #[wasm_bindgen]
+pub struct TreeMesh {
+    vertices: Vec<f32>,
+    normals: Vec<f32>,
+    uvs: Vec<f32>,
+    indices: Vec<u32>,
+}
+
+#[wasm_bindgen]
+impl TreeMesh {
+    #[wasm_bindgen(getter)]
+    pub fn vertices(&self) -> Vec<f32> {
+        self.vertices.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn normals(&self) -> Vec<f32> {
+        self.normals.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn uvs(&self) -> Vec<f32> {
+        self.uvs.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn indices(&self) -> Vec<u32> {
+        self.indices.clone()
+    }
+}
+
+#[wasm_bindgen]
 impl TreeObject {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32, trunk_height: f32, butressing: f32) -> Result<TreeObject, JsValue> {
@@ -35,7 +66,7 @@ impl TreeObject {
             split_height: trunk_height * 0.6, // Default split at 60% of height
             tree: tree_structure::TreeStructure::new(tree_structure::TreeSpecies {
                 branching_angle_range: (0.3, 0.8),
-                ring_spacing: 0.1,
+                ring_spacing: trunk_height / 3.0, // Only 3-4 rings for trunk (root, mid, split, top)
                 taper_rate: 0.9,
                 max_branch_depth: 8,
             }),
@@ -66,101 +97,75 @@ impl TreeObject {
         };
         self.tree.rings.push(root_ring);
         
-        // Generate trunk rings up to split height
-        let total_rings = (self.trunk_height / species.ring_spacing) as u32;
-        let split_ring_index = (self.split_height / species.ring_spacing) as u32;
+        // Create exactly 5 rings for simple tree structure
+        // Ring 0: Root (already created)
+        // Ring 1: Lower trunk  
+        // Ring 2: Split point
+        // Ring 3: Left branch end
+        // Ring 4: Right branch end
         
-        // Single trunk rings before split
-        for i in 1..=split_ring_index {
-            let height = i as f32 * species.ring_spacing;
-            let ring = tree_structure::TreeRing {
-                center: Vec3::new(0.0, height, 0.0), // Y is up axis
-                radius: self.butressing * (1.0 - height / self.trunk_height * 0.3),
-                orientation: Quat::IDENTITY,
-                parent_index: Some((i - 1) as usize),
-                children_indices: Vec::new(),
-            };
-            if i > 1 {
-                self.tree.rings[(i - 1) as usize].children_indices.push(i as usize);
-            }
-            self.tree.rings.push(ring);
-        }
+        // Ring 1: Lower trunk
+        let lower_height = self.split_height * 0.5;
+        let lower_ring = tree_structure::TreeRing {
+            center: Vec3::new(0.0, lower_height, 0.0),
+            radius: self.butressing * 0.9,
+            orientation: Quat::IDENTITY,
+            parent_index: Some(0),
+            children_indices: Vec::new(),
+        };
+        self.tree.rings[0].children_indices.push(1);
+        self.tree.rings.push(lower_ring);
         
-        // After split height, create two branches
-        if split_ring_index < total_rings {
-            let split_parent_idx = split_ring_index as usize;
-            let branch_angle = 30.0_f32.to_radians(); // 30 degree branch angle
-            let branch_separation = 0.3; // Distance between branch centers
-            
-            // Create branching rings from split point to top
-            for i in (split_ring_index + 1)..total_rings {
-                let height = i as f32 * species.ring_spacing;
-                let height_above_split = height - self.split_height;
-                let branch_radius = self.butressing * (1.0 - height / self.trunk_height * 0.4);
-                
-                // Calculate parent indices before creating rings
-                let current_len = self.tree.rings.len();
-                let left_parent_idx = if i == split_ring_index + 1 { 
-                    split_parent_idx 
-                } else { 
-                    current_len - 2 
-                };
-                let right_parent_idx = if i == split_ring_index + 1 { 
-                    split_parent_idx 
-                } else { 
-                    current_len - 1 
-                };
-                
-                // Left branch
-                let left_offset = Vec3::new(
-                    -branch_separation - height_above_split * branch_angle.sin(),
-                    height_above_split * (1.0 - branch_angle.cos() * 0.2),
-                    0.0
-                );
-                let left_ring = tree_structure::TreeRing {
-                    center: Vec3::new(0.0, self.split_height, 0.0) + left_offset,
-                    radius: branch_radius,
-                    orientation: Quat::from_rotation_y(-branch_angle * 0.5),
-                    parent_index: Some(left_parent_idx),
-                    children_indices: Vec::new(),
-                };
-                
-                // Right branch  
-                let right_offset = Vec3::new(
-                    branch_separation + height_above_split * branch_angle.sin(),
-                    height_above_split * (1.0 - branch_angle.cos() * 0.2),
-                    0.0
-                );
-                let right_ring = tree_structure::TreeRing {
-                    center: Vec3::new(0.0, self.split_height, 0.0) + right_offset,
-                    radius: branch_radius,
-                    orientation: Quat::from_rotation_y(branch_angle * 0.5),
-                    parent_index: Some(right_parent_idx),
-                    children_indices: Vec::new(),
-                };
-                
-                // Store indices before pushing to avoid borrow conflicts
-                let current_len = self.tree.rings.len();
-                let left_ring_idx = current_len;
-                let right_ring_idx = current_len + 1;
-                
-                // Update parent's children
-                if i == split_ring_index + 1 {
-                    // First branching rings - both are children of split parent
-                    self.tree.rings[split_parent_idx].children_indices.push(left_ring_idx);
-                    self.tree.rings[split_parent_idx].children_indices.push(right_ring_idx);
-                } else {
-                    // Subsequent rings - each branch continues from its previous ring
-                    let left_parent_idx = current_len - 2;
-                    let right_parent_idx = current_len - 1;
-                    self.tree.rings[left_parent_idx].children_indices.push(left_ring_idx);
-                    self.tree.rings[right_parent_idx].children_indices.push(right_ring_idx);
-                }
-                
-                self.tree.rings.push(left_ring);
-                self.tree.rings.push(right_ring);
-            }
-        }
+        // Ring 2: Split point
+        let split_ring = tree_structure::TreeRing {
+            center: Vec3::new(0.0, self.split_height, 0.0),
+            radius: self.butressing * 0.7,
+            orientation: Quat::IDENTITY,
+            parent_index: Some(1),
+            children_indices: Vec::new(),
+        };
+        self.tree.rings[1].children_indices.push(2);
+        self.tree.rings.push(split_ring);
+        
+        // Ring 3 & 4: Branch ends  
+        let branch_angle = 30.0_f32.to_radians();
+        let branch_length = self.trunk_height - self.split_height;
+        let branch_separation = 0.4;
+        
+        // Ring 3: Left branch end
+        let left_end = Vec3::new(
+            -branch_separation - branch_length * branch_angle.sin(),
+            self.split_height + branch_length * branch_angle.cos(),
+            0.0
+        );
+        let left_branch_ring = tree_structure::TreeRing {
+            center: left_end,
+            radius: self.butressing * 0.4,
+            orientation: Quat::from_rotation_y(-branch_angle * 0.5),
+            parent_index: Some(2), // Child of split ring
+            children_indices: Vec::new(),
+        };
+        
+        // Ring 4: Right branch end
+        let right_end = Vec3::new(
+            branch_separation + branch_length * branch_angle.sin(),
+            self.split_height + branch_length * branch_angle.cos(),
+            0.0
+        );
+        let right_branch_ring = tree_structure::TreeRing {
+            center: right_end,
+            radius: self.butressing * 0.4,
+            orientation: Quat::from_rotation_y(branch_angle * 0.5),
+            parent_index: Some(2), // Child of split ring
+            children_indices: Vec::new(),
+        };
+        
+        // Connect split ring to both branch rings
+        self.tree.rings[2].children_indices.push(3);
+        self.tree.rings[2].children_indices.push(4);
+        
+        self.tree.rings.push(left_branch_ring);
+        self.tree.rings.push(right_branch_ring);
     }
 
     pub fn set_trunk_height(&mut self, height: f32) {
@@ -194,6 +199,40 @@ impl TreeObject {
     
     pub fn ring_radius(&self, index: usize) -> Option<f32> {
         self.tree.rings.get(index).map(|ring| ring.radius)
+    }
+    
+    pub fn generate_tree_mesh(&self, resolution: u32) -> TreeMesh {
+        let ring_mesh = self.tree.generate_mesh(resolution);
+        
+        // Convert Vec3 vertices to flat f32 array
+        let mut vertices = Vec::with_capacity(ring_mesh.vertices.len() * 3);
+        for vertex in &ring_mesh.vertices {
+            vertices.push(vertex.x);
+            vertices.push(vertex.y);
+            vertices.push(vertex.z);
+        }
+        
+        // Convert Vec3 normals to flat f32 array
+        let mut normals = Vec::with_capacity(ring_mesh.normals.len() * 3);
+        for normal in &ring_mesh.normals {
+            normals.push(normal.x);
+            normals.push(normal.y);
+            normals.push(normal.z);
+        }
+        
+        // Convert Vec2 UVs to flat f32 array
+        let mut uvs = Vec::with_capacity(ring_mesh.uvs.len() * 2);
+        for uv in &ring_mesh.uvs {
+            uvs.push(uv.x);
+            uvs.push(uv.y);
+        }
+        
+        TreeMesh {
+            vertices,
+            normals,
+            uvs,
+            indices: ring_mesh.indices,
+        }
     }
 }
 

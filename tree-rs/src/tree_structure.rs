@@ -75,16 +75,17 @@ impl TreeStructure {
         let mut uvs = Vec::new();
         let mut indices = Vec::new();
 
-        // Generate geometry for each ring
+        // Generate geometry for each ring (just perimeter points, no faces)
         let ring_geometries: Vec<RingGeometry> = self.rings
             .iter()
             .map(|ring| ring.generate_geometry(ring_resolution))
             .collect();
 
-        // Connect parent rings to children
+        // Connect parent rings to children with tubular surfaces
+        // This creates the actual tree mesh by connecting ring perimeters
         for (ring_idx, ring) in self.rings.iter().enumerate() {
             for &child_idx in &ring.children_indices {
-                self.connect_rings(
+                self.connect_ring_perimeters(
                     &ring_geometries[ring_idx],
                     &ring_geometries[child_idx],
                     &mut vertices,
@@ -98,7 +99,8 @@ impl TreeStructure {
         RingMesh { vertices, normals, uvs, indices }
     }
 
-    fn connect_rings(
+
+    fn connect_ring_perimeters(
         &self,
         parent_geo: &RingGeometry,
         child_geo: &RingGeometry,
@@ -108,15 +110,33 @@ impl TreeStructure {
         indices: &mut Vec<u32>,
     ) {
         let base_vertex_idx = vertices.len() as u32;
-        let resolution = parent_geo.points.len();
+        let resolution = parent_geo.points.len().min(child_geo.points.len());
 
-        // Add vertices from both rings
-        vertices.extend_from_slice(&parent_geo.points);
-        vertices.extend_from_slice(&child_geo.points);
+        // Add vertices from both ring perimeters
+        for i in 0..resolution {
+            vertices.push(parent_geo.points[i]);
+            vertices.push(child_geo.points[i]);
+        }
 
-        // Interpolate normals for smooth transitions
-        normals.extend_from_slice(&parent_geo.normals);
-        normals.extend_from_slice(&child_geo.normals);
+        // Calculate surface normals for tubular connection
+        for i in 0..resolution {
+            let next_i = (i + 1) % resolution;
+            
+            // Get quad vertices
+            let p1 = parent_geo.points[i];
+            let p2 = child_geo.points[i];
+            let p3 = child_geo.points[next_i];
+            let p4 = parent_geo.points[next_i];
+            
+            // Calculate face normal for this section of tube
+            let edge1 = p2 - p1;
+            let edge2 = p4 - p1;
+            let face_normal = edge1.cross(edge2).normalize();
+            
+            // Use outward-pointing normals
+            normals.push(face_normal);
+            normals.push(face_normal);
+        }
 
         // Generate UVs (u = around circumference, v = along branch)
         for i in 0..resolution {
@@ -125,17 +145,17 @@ impl TreeStructure {
             uvs.push(Vec2::new(u, 1.0)); // Child ring
         }
 
-        // Create quad faces between rings
+        // Create quad faces between ring perimeters (tubular surface)
         for i in 0..resolution {
             let next_i = (i + 1) % resolution;
 
-            // Indices for the quad (parent_i, child_i, child_next, parent_next)
-            let p1 = base_vertex_idx + i as u32;                    // parent current
-            let p2 = base_vertex_idx + resolution as u32 + i as u32; // child current
-            let p3 = base_vertex_idx + resolution as u32 + next_i as u32; // child next
-            let p4 = base_vertex_idx + next_i as u32;               // parent next
+            // Indices for the quad connecting perimeter points
+            let p1 = base_vertex_idx + (i * 2) as u32;       // parent current
+            let p2 = base_vertex_idx + (i * 2 + 1) as u32;   // child current  
+            let p3 = base_vertex_idx + (next_i * 2 + 1) as u32; // child next
+            let p4 = base_vertex_idx + (next_i * 2) as u32;  // parent next
 
-            // Two triangles per quad
+            // Two triangles per quad forming the tube surface
             indices.extend_from_slice(&[p1, p2, p3, p1, p3, p4]);
         }
     }
@@ -314,15 +334,15 @@ impl TreeRing {
         for i in 0..resolution {
             let angle = (i as f32 / resolution as f32) * 2.0 * std::f32::consts::PI;
 
-            // Local ring coordinates
+            // Local ring coordinates in XZ plane (horizontal ring)
             let local_x = angle.cos() * self.radius;
-            let local_y = angle.sin() * self.radius;
-            let local_point = Vec3::new(local_x, local_y, 0.0);
+            let local_z = angle.sin() * self.radius;
+            let local_point = Vec3::new(local_x, 0.0, local_z);
 
             // Transform to world space using ring orientation
             let world_point = self.center + self.orientation * local_point;
             let world_normal = self.orientation * local_point.normalize();
-            let world_tangent = self.orientation * Vec3::new(-local_y, local_x, 0.0).normalize();
+            let world_tangent = self.orientation * Vec3::new(-local_z, 0.0, local_x).normalize();
 
             points.push(world_point);
             normals.push(world_normal);
@@ -333,7 +353,7 @@ impl TreeRing {
             points,
             normals,
             tangents,
-            ring_normal: self.orientation * Vec3::Z,
+            ring_normal: self.orientation * Vec3::Y, // Y is up, so ring normal is Y
         }
     }
 }
