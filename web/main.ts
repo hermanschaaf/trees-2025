@@ -26,6 +26,15 @@ const treeParams = {
     height: tree.trunk_height,
     butressing: tree.butressing,
     splitHeight: tree.split_height, // Height at which trunk splits into branches
+    segmentLength: tree.segment_length,
+    branchAngleMin: tree.branch_angle_min,
+    branchAngleMax: tree.branch_angle_max,
+    bendAngleMin: tree.bend_angle_min,
+    bendAngleMax: tree.bend_angle_max,
+    branchFrequencyMin: tree.branch_frequency_min,
+    branchFrequencyMax: tree.branch_frequency_max,
+    maxDepth: tree.max_depth,
+    radiusTaper: tree.radius_taper,
     radius: 0.5,
     radialSegments: 32
 };
@@ -179,6 +188,63 @@ treeFolder.add(treeParams, 'butressing', 0.1, 5).onChange((value: number) => {
 treeFolder.add(treeParams, 'splitHeight', 0.5, 8).onChange((value: number) => {
     tree.set_split_height(value);
     treeParams.splitHeight = value;
+    redrawTree();
+});
+
+// Add advanced tree generation controls
+const advancedFolder = gui.addFolder('Advanced Parameters');
+
+advancedFolder.add(treeParams, 'segmentLength', 0.1, 1.0).name('Segment Length').onChange((value: number) => {
+    tree.set_segment_length(value);
+    treeParams.segmentLength = value;
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'branchAngleMin', 5.0, 45.0).name('Min Branch Angle (°)').onChange((value: number) => {
+    tree.set_branch_angle_range(value, treeParams.branchAngleMax);
+    treeParams.branchAngleMin = value;
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'branchAngleMax', 15.0, 90.0).name('Max Branch Angle (°)').onChange((value: number) => {
+    tree.set_branch_angle_range(treeParams.branchAngleMin, value);
+    treeParams.branchAngleMax = value;
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'bendAngleMin', -45.0, 0.0).name('Min Bend Angle (°)').onChange((value: number) => {
+    tree.set_bend_angle_range(value, treeParams.bendAngleMax);
+    treeParams.bendAngleMin = value;
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'bendAngleMax', 0.0, 45.0).name('Max Bend Angle (°)').onChange((value: number) => {
+    tree.set_bend_angle_range(treeParams.bendAngleMin, value);
+    treeParams.bendAngleMax = value;
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'branchFrequencyMin', 1, 10).name('Min Branch Frequency').onChange((value: number) => {
+    tree.set_branch_frequency_range(Math.floor(value), treeParams.branchFrequencyMax);
+    treeParams.branchFrequencyMin = Math.floor(value);
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'branchFrequencyMax', 2, 15).name('Max Branch Frequency').onChange((value: number) => {
+    tree.set_branch_frequency_range(treeParams.branchFrequencyMin, Math.floor(value));
+    treeParams.branchFrequencyMax = Math.floor(value);
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'maxDepth', 1, 12).name('Max Depth').onChange((value: number) => {
+    tree.set_max_depth(Math.floor(value));
+    treeParams.maxDepth = Math.floor(value);
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'radiusTaper', 0.1, 1.0).name('Radius Taper').onChange((value: number) => {
+    tree.set_radius_taper(value);
+    treeParams.radiusTaper = value;
     redrawTree();
 });
 
