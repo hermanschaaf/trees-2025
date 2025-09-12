@@ -13,7 +13,8 @@ const BARK_TO_GROWTH_RATIO: f32 = 0.00002;
 #[derive(Debug)]
 pub struct Branch {
     pub length: f32,
-    pub radius: f32,
+    pub start_radius: f32,
+    pub end_radius: f32,
     pub depth: u32,
     pub direction: Quaternion,
     pub parent: Option<usize>,
@@ -31,10 +32,11 @@ pub struct Branch {
 }
 
 impl Branch {
-    pub fn new(direction: Quaternion, length: f32, radius: f32, depth: u32, counter: u32, priority: f32, parent: Option<usize>) -> Branch {
+    pub fn new(direction: Quaternion, length: f32, start_radius: f32, end_radius: f32, depth: u32, counter: u32, priority: f32, parent: Option<usize>) -> Branch {
         Branch {
             length,
-            radius,
+            start_radius,
+            end_radius,
             depth,
             direction,
             parent,
@@ -91,8 +93,32 @@ impl Tree {
             root: 0,
             rng: StdRng::seed_from_u64(seed as u64),
         };
-        tree.branches.push(Branch::new(Quaternion::new(1.0, 0.0, 0.0, 0.0), 3.0, 1.0, 0, 0, 1.0, None));
+        tree.branches.push(Branch::new(Quaternion::new(1.0, 0.0, 0.0, 0.0), 3.0, 1.0, 1.0, 0, 0, 1.0, None));
         tree
+    }
+
+    pub fn render(&mut self) {
+        const BRANCH_ANGLE: f32 = 30.0;
+        const BRANCH_LENGTH: f32 = 1.0;
+        const MAX_BRANCH_DEPTH: u32 = 3;
+        self.branches.clear();
+        self.branches.push(Branch::new(Quaternion::new(1.0, 0.0, 0.0, 0.0), self.trunk_height, 1.0, 1.0, 0, 0, 1.0, None));
+
+        // recursively build branches
+        self.build_branches(0, BRANCH_ANGLE, BRANCH_LENGTH, MAX_BRANCH_DEPTH);
+    }
+
+    pub fn build_branches(&mut self, parent_idx: usize, angle: f32, length: f32, depth: u32) {
+        if depth == 0 {
+            return;
+        }
+        let mut branches = Vec::new();
+        for _ in 0..3 {
+            let branch = Branch::new(Quaternion::new(1.0, 0.0, angle, 0.0), length, 1.0, 1.0, depth, 0, 1.0, Some(parent_idx));
+            branches.push(branch);
+            self.build_branches(self.branches.len() - 1, angle, length, depth - 1);
+        }
+        self.branches.extend(branches);
     }
 
     pub fn grow(&mut self) {

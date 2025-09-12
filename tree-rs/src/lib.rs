@@ -15,7 +15,8 @@ pub struct TreeObject {
 #[wasm_bindgen]
 pub struct Branch {
     pub length: f32,
-    pub radius: f32,
+    pub start_radius: f32,
+    pub end_radius: f32,
     pub depth: u32,
     pub direction: wasm_math::Quaternion,
     pub start: wasm_math::Vector3d,
@@ -40,10 +41,8 @@ impl TreeObject {
         self.butressing = butressing;
     }
 
-    pub fn grow(&mut self) {
-        self.tree.trunk_height += 1.0;
-        self.butressing += 1.0;
-        // self.tree.grow();
+    pub fn render(&mut self) {
+        self.tree.render();
     }
 
     pub fn branches(&mut self) -> Vec<Branch> {
@@ -65,7 +64,8 @@ impl TreeObject {
                 Branch {
                     depth: branch.depth,
                     length: branch.length,
-                    radius: branch.radius,
+                    start_radius: branch.start_radius,
+                    end_radius: branch.end_radius,
                     direction: wasm_math::Quaternion::new(
                         branch.direction.w(),
                         branch.direction.x(),
