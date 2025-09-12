@@ -167,7 +167,9 @@ impl TreeObject {
         let parent_center = rings[parent_index].center;
         
         // Add some bend to the growth direction for natural curves
-        let bend_angle = rng.gen_range(bend_angle_range.0..=bend_angle_range.1).to_radians();
+        let bend_min = bend_angle_range.0.min(bend_angle_range.1);
+        let bend_max = bend_angle_range.1.max(bend_angle_range.0);
+        let bend_angle = rng.gen_range(bend_min..=bend_max).to_radians();
         let bend_axis = Vec3::new(rng.gen_range(-1.0..=1.0), 0.0, rng.gen_range(-1.0..=1.0)).normalize();
         let bend_rotation = Quat::from_axis_angle(bend_axis, bend_angle);
         let bent_direction = (bend_rotation * growth_direction).normalize();
@@ -188,12 +190,16 @@ impl TreeObject {
         rings[parent_index].children_indices.push(ring_index);
         rings.push(ring);
         
-        // Determine if branching should occur
-        let should_branch = segments_since_branch >= rng.gen_range(branch_frequency_range.0..=branch_frequency_range.1);
+        // Determine if branching should occur - ensure valid range
+        let freq_min = branch_frequency_range.0.max(1);
+        let freq_max = branch_frequency_range.1.max(freq_min);
+        let should_branch = segments_since_branch >= rng.gen_range(freq_min..=freq_max);
         
         if should_branch && depth < max_depth - 1 {
-            // Create two branches
-            let branch_angle = rng.gen_range(branch_angle_range.0..=branch_angle_range.1).to_radians();
+            // Create two branches - ensure valid range
+            let angle_min = branch_angle_range.0.min(branch_angle_range.1);
+            let angle_max = branch_angle_range.1.max(branch_angle_range.0);
+            let branch_angle = rng.gen_range(angle_min..=angle_max).to_radians();
             let branch_radius = current_radius * radius_taper;
             
             // Generate random branch directions
@@ -280,35 +286,39 @@ impl TreeObject {
     }
 
     pub fn set_segment_length(&mut self, segment_length: f32) {
-        self.segment_length = segment_length;
+        self.segment_length = segment_length.max(0.01); // Minimum segment length
         self.regenerate_tree();
     }
 
     pub fn set_branch_angle_range(&mut self, min: f32, max: f32) {
-        self.branch_angle_min = min;
-        self.branch_angle_max = max;
+        self.branch_angle_min = min.min(max);
+        self.branch_angle_max = max.max(min);
         self.regenerate_tree();
     }
 
     pub fn set_bend_angle_range(&mut self, min: f32, max: f32) {
-        self.bend_angle_min = min;
-        self.bend_angle_max = max;
+        self.bend_angle_min = min.min(max);
+        self.bend_angle_max = max.max(min);
         self.regenerate_tree();
     }
 
     pub fn set_branch_frequency_range(&mut self, min: u32, max: u32) {
-        self.branch_frequency_min = min;
-        self.branch_frequency_max = max;
+        // Ensure minimum values to prevent division by zero or invalid ranges
+        let validated_min = min.max(1).min(max.max(1));
+        let validated_max = max.max(1).max(validated_min);
+        
+        self.branch_frequency_min = validated_min;
+        self.branch_frequency_max = validated_max;
         self.regenerate_tree();
     }
 
     pub fn set_max_depth(&mut self, max_depth: u32) {
-        self.max_depth = max_depth;
+        self.max_depth = max_depth.max(1); // Minimum depth of 1
         self.regenerate_tree();
     }
 
     pub fn set_radius_taper(&mut self, radius_taper: f32) {
-        self.radius_taper = radius_taper;
+        self.radius_taper = radius_taper.max(0.1).min(1.0); // Clamp between 0.1 and 1.0
         self.regenerate_tree();
     }
 
