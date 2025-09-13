@@ -1,12 +1,70 @@
 import * as THREE from 'three';
 import * as dat from 'dat.gui';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 import init, { generate } from "/static/js/tree_rs.js";
 
 await init();
 const tree = generate(123, 5.0, 1.0);
 console.log("Rust generate:", tree);
+
+// Load twig library metadata
+const loadTwigLibrary = async (): Promise<TwigLibrary> => {
+    try {
+        const response = await fetch('/static/twigs/twigs-library.json');
+        if (!response.ok) {
+            throw new Error(`Failed to load twig library: ${response.statusText}`);
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Error loading twig library:', error);
+        // Return default library with just procedural twigs
+        return {
+            version: '1.0',
+            description: 'Default twig library (fallback)',
+            twigs: [{
+                id: 'procedural',
+                name: 'Procedural Twigs',
+                description: 'Generated procedurally using basic geometries',
+                type: 'procedural',
+                filename: null,
+                defaultScale: 1.0,
+                preview: {
+                    thumbnail: null,
+                    description: 'Simple procedural leaves and branches'
+                }
+            }]
+        };
+    }
+};
+
+// Load GLTF model with caching
+const loadTwigModel = async (filename: string): Promise<THREE.Object3D | null> => {
+    if (twigModelCache.has(filename)) {
+        return twigModelCache.get(filename)!;
+    }
+    
+    try {
+        const gltf = await new Promise<any>((resolve, reject) => {
+            gltfLoader.load(
+                `/static/twigs/${filename}`,
+                resolve,
+                undefined,
+                reject
+            );
+        });
+        
+        const model = gltf.scene.clone();
+        twigModelCache.set(filename, model);
+        console.log(`Loaded GLTF model: ${filename}`);
+        return model;
+    } catch (error) {
+        console.error(`Failed to load GLTF model ${filename}:`, error);
+        return null;
+    }
+};
+
 console.log("trunk_height: ", tree.trunk_height);
 console.log("buttressing: ", tree.butressing);
 console.log("rings_count: ", tree.rings_count());
@@ -48,23 +106,217 @@ const treeParams = {
     // Twig system parameters
     twigEnable: tree.twig_enable,
     twigDensity: tree.twig_density,
-    twigScale: tree.twig_scale,
+    twigScale: 1.0, // Default value, will be updated by the tree object
     twigAngleVariation: tree.twig_angle_variation
 };
 
 let ringMeshes: THREE.Mesh[] = [];
 let twigMeshes: THREE.Mesh[] = [];
 
-// Create materials for rings
-const ringMaterial = new THREE.MeshPhongMaterial({ 
-    color: 0x8B4513, // Brown color
-    shininess: 30,
-    specular: 0x222222
-});
-const cylinderMaterial = new THREE.MeshPhongMaterial({ 
+// Twig library system
+interface TwigLibraryItem {
+    id: string;
+    name: string;
+    description: string;
+    type: 'procedural' | 'gltf';
+    filename: string | null;
+    defaultScale: number;
+    preview: {
+        thumbnail: string | null;
+        description: string;
+    };
+}
+
+interface TwigLibrary {
+    version: string;
+    description: string;
+    twigs: TwigLibraryItem[];
+}
+
+let twigLibrary: TwigLibrary | null = null;
+let gltfLoader: GLTFLoader;
+let twigModelCache: Map<string, THREE.Object3D> = new Map();
+let selectedTwigType = 'procedural';
+
+// Bark texture system
+interface BarkTextureItem {
+    id: string;
+    name: string;
+    description: string;
+    type: 'procedural' | 'texture';
+    diffuse: string | null;
+    normal: string | null;
+    roughness: string | null;
+    scale: number;
+    tiling: [number, number];
+    color: string;
+}
+
+interface BarkLibrary {
+    version: string;
+    description: string;
+    textures: BarkTextureItem[];
+    materialProperties: {
+        metalness: number;
+        roughnessScale: number;
+        normalScale: number;
+        envMapIntensity: number;
+    };
+}
+
+let barkLibrary: BarkLibrary | null = null;
+let textureLoader: THREE.TextureLoader;
+let barkTextureCache: Map<string, THREE.Texture> = new Map();
+let selectedBarkType = 'default';
+
+// Initialize GLTF loader and texture loader
+gltfLoader = new GLTFLoader();
+textureLoader = new THREE.TextureLoader();
+
+// Load bark library metadata
+const loadBarkLibrary = async (): Promise<BarkLibrary> => {
+    try {
+        const response = await fetch('/static/textures/bark/bark-library.json');
+        if (!response.ok) {
+            throw new Error(`Failed to load bark library: ${response.statusText}`);
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Error loading bark library:', error);
+        // Return default library with just procedural bark
+        return {
+            version: '1.0',
+            description: 'Default bark library (fallback)',
+            textures: [{
+                id: 'default',
+                name: 'Default (No Texture)',
+                description: 'Solid color material without texture',
+                type: 'procedural',
+                diffuse: null,
+                normal: null,
+                roughness: null,
+                scale: 1.0,
+                tiling: [1.0, 1.0],
+                color: '#8B4513'
+            }],
+            materialProperties: {
+                metalness: 0.0,
+                roughnessScale: 1.0,
+                normalScale: 1.0,
+                envMapIntensity: 0.3
+            }
+        };
+    }
+};
+
+// Load bark texture with caching
+const loadBarkTexture = async (filename: string): Promise<THREE.Texture | null> => {
+    if (barkTextureCache.has(filename)) {
+        return barkTextureCache.get(filename)!;
+    }
+    
+    try {
+        const texture = await new Promise<THREE.Texture>((resolve, reject) => {
+            textureLoader.load(
+                `/static/textures/bark/${filename}`,
+                resolve,
+                undefined,
+                reject
+            );
+        });
+        
+        // Configure texture settings
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.generateMipmaps = true;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        
+        barkTextureCache.set(filename, texture);
+        console.log(`Loaded bark texture: ${filename}`);
+        return texture;
+    } catch (error) {
+        console.error(`Failed to load bark texture ${filename}:`, error);
+        return null;
+    }
+};
+
+// Initialize libraries
+twigLibrary = await loadTwigLibrary();
+barkLibrary = await loadBarkLibrary();
+console.log('Loaded twig library:', twigLibrary);
+console.log('Loaded bark library:', barkLibrary);
+
+// Create bark material function
+const createBarkMaterial = async (barkType: string): Promise<THREE.MeshStandardMaterial> => {
+    if (!barkLibrary) {
+        // Fallback material
+        return new THREE.MeshStandardMaterial({
+            color: 0x8B4513,
+            roughness: 0.8,
+            metalness: 0.0
+        });
+    }
+    
+    const barkTexture = barkLibrary.textures.find(t => t.id === barkType);
+    if (!barkTexture) {
+        // Fallback material
+        return new THREE.MeshStandardMaterial({
+            color: 0x8B4513,
+            roughness: 0.8,
+            metalness: 0.0
+        });
+    }
+    
+    const material = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(barkTexture.color),
+        roughness: 0.8,
+        metalness: barkLibrary.materialProperties.metalness
+    });
+    
+    // Load textures if specified
+    if (barkTexture.type === 'texture') {
+        // Load diffuse texture
+        if (barkTexture.diffuse) {
+            const diffuseTexture = await loadBarkTexture(barkTexture.diffuse);
+            if (diffuseTexture) {
+                diffuseTexture.repeat.set(barkTexture.tiling[0], barkTexture.tiling[1]);
+                material.map = diffuseTexture;
+            }
+        }
+        
+        // Load normal texture
+        if (barkTexture.normal) {
+            const normalTexture = await loadBarkTexture(barkTexture.normal);
+            if (normalTexture) {
+                normalTexture.repeat.set(barkTexture.tiling[0], barkTexture.tiling[1]);
+                material.normalMap = normalTexture;
+                material.normalScale = new THREE.Vector2(
+                    barkLibrary.materialProperties.normalScale,
+                    barkLibrary.materialProperties.normalScale
+                );
+            }
+        }
+        
+        // Load roughness texture
+        if (barkTexture.roughness) {
+            const roughnessTexture = await loadBarkTexture(barkTexture.roughness);
+            if (roughnessTexture) {
+                roughnessTexture.repeat.set(barkTexture.tiling[0], barkTexture.tiling[1]);
+                material.roughnessMap = roughnessTexture;
+            }
+        }
+    }
+    
+    return material;
+};
+
+// Create initial materials
+let ringMaterial = await createBarkMaterial(selectedBarkType);
+const cylinderMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x654321, // Darker brown for branches
-    shininess: 20,
-    specular: 0x111111
+    roughness: 0.8,
+    metalness: 0.0
 });
 
 // Create materials for twigs
@@ -72,17 +324,34 @@ const leafMaterial = new THREE.MeshLambertMaterial({
     color: 0x228B22, // Forest green
     side: THREE.DoubleSide // Show both sides of leaves
 });
-const twigBranchMaterial = new THREE.MeshPhongMaterial({ 
+const twigBranchMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x8B4513, // Brown like main branches
-    shininess: 10
+    roughness: 0.7,
+    metalness: 0.0
 });
-const budMaterial = new THREE.MeshPhongMaterial({ 
+const budMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x90EE90, // Light green for buds
-    shininess: 15
+    roughness: 0.6,
+    metalness: 0.0
 });
 
+// Performance optimization: use instanced rendering for GLTF twigs
+let twigInstancedMeshes: THREE.InstancedMesh[] = [];
+let twigInstanceCount = 0;
+const maxTwigInstances = 1000; // Reasonable limit to prevent crashes
+
 // Create twig geometries for different twig types
-const createTwigGeometry = (twigType: string, scale: number) => {
+const createTwigGeometry = async (twigType: string, scale: number): Promise<THREE.Object3D | null> => {
+    // Check if we should use GLTF models
+    if (selectedTwigType !== 'procedural' && twigLibrary) {
+        const selectedTwig = twigLibrary.twigs.find(t => t.id === selectedTwigType);
+        if (selectedTwig && selectedTwig.type === 'gltf' && selectedTwig.filename) {
+            // Return null for GLTF models - we'll handle them with instancing
+            return null;
+        }
+    }
+    
+    // Fallback to procedural generation
     switch (twigType) {
         case 'LeafCluster':
             // Create a cluster of small leaf planes
@@ -144,8 +413,83 @@ const createTwigGeometry = (twigType: string, scale: number) => {
     }
 };
 
+// Create instanced mesh for GLTF twigs
+const createTwigInstancedMesh = async (twigCount: number): Promise<void> => {
+    if (selectedTwigType === 'procedural' || !twigLibrary) return;
+    
+    const selectedTwig = twigLibrary.twigs.find(t => t.id === selectedTwigType);
+    if (!selectedTwig || selectedTwig.type !== 'gltf' || !selectedTwig.filename) return;
+    
+    // Limit the number of instances to prevent crashes
+    const actualInstanceCount = Math.min(twigCount, maxTwigInstances);
+    
+    // Load the GLTF model
+    const model = await loadTwigModel(selectedTwig.filename);
+    if (!model) return;
+    
+    // Extract geometry and materials from all meshes in the model
+    const meshData: Array<{geometry: THREE.BufferGeometry, material: THREE.Material}> = [];
+    
+    model.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+            // Clone the material properly
+            let clonedMaterial: THREE.Material;
+            
+            if (Array.isArray(child.material)) {
+                // Handle multi-material case - use first material
+                clonedMaterial = child.material[0].clone();
+                console.log('GLTF twig has multi-material, using first:', clonedMaterial.type);
+            } else {
+                clonedMaterial = child.material.clone();
+                console.log('GLTF twig material type:', clonedMaterial.type);
+            }
+            
+            // Debug material properties
+            if ('map' in clonedMaterial && clonedMaterial.map) {
+                console.log('Material has diffuse texture:', clonedMaterial.map);
+            }
+            if ('normalMap' in clonedMaterial && clonedMaterial.normalMap) {
+                console.log('Material has normal map');
+            }
+            
+            // Ensure material is compatible with instanced rendering
+            if ('transparent' in clonedMaterial) {
+                // Force some settings that work better with instanced meshes
+                clonedMaterial.transparent = true;
+                clonedMaterial.alphaTest = 0.01; // Prevent z-fighting issues
+            }
+            
+            meshData.push({
+                geometry: child.geometry.clone(),
+                material: clonedMaterial
+            });
+        }
+    });
+    
+    if (meshData.length === 0) {
+        console.warn('No meshes found in GLTF twig model');
+        return;
+    }
+    
+    console.log(`Found ${meshData.length} meshes in GLTF twig model`);
+    
+    // Create instanced meshes for each mesh in the GLTF model
+    for (const meshInfo of meshData) {
+        const instancedMesh = new THREE.InstancedMesh(meshInfo.geometry, meshInfo.material, actualInstanceCount);
+        instancedMesh.castShadow = true;
+        instancedMesh.receiveShadow = true;
+        
+        scene.add(instancedMesh);
+        twigInstancedMeshes.push(instancedMesh);
+    }
+    
+    twigInstanceCount = 0;
+    
+    console.log(`Created ${twigInstancedMeshes.length} instanced meshes for ${actualInstanceCount} twig instances each`);
+};
+
 // Create tree visualization using generated mesh
-const createTreeVisualization = () => {
+const createTreeVisualization = async () => {
     // Clear existing meshes
     ringMeshes.forEach(mesh => {
         scene.remove(mesh);
@@ -168,6 +512,14 @@ const createTreeVisualization = () => {
         }
     });
     twigMeshes = [];
+    
+    // Clear existing instanced meshes
+    twigInstancedMeshes.forEach(mesh => {
+        scene.remove(mesh);
+        mesh.dispose();
+    });
+    twigInstancedMeshes = [];
+    twigInstanceCount = 0;
     
     // Generate mesh from Rust
     const treeMesh = tree.generate_tree_mesh(16); // 16 points per ring
@@ -229,55 +581,118 @@ const createTreeVisualization = () => {
         const twigCount = tree.twigs_count();
         console.log(`Generating ${twigCount} twigs`);
         
-        for (let i = 0; i < twigCount; i++) {
-            const position = tree.twig_position(i);
-            const scale = tree.twig_scale(i);
-            const twigType = tree.twig_type(i);
-            const orientationX = tree.twig_orientation_x(i);
-            const orientationY = tree.twig_orientation_y(i);
-            const orientationZ = tree.twig_orientation_z(i);
-            const orientationW = tree.twig_orientation_w(i);
+        // Use instanced rendering for GLTF models
+        if (selectedTwigType !== 'procedural') {
+            await createTwigInstancedMesh(twigCount);
             
-            if (position && scale !== null && twigType && 
-                orientationX !== null && orientationY !== null && 
-                orientationZ !== null && orientationW !== null) {
+            if (twigInstancedMeshes.length > 0) {
+                // Set instance transforms for all instanced meshes
+                const matrix = new THREE.Matrix4();
+                const instanceCount = Math.min(twigCount, maxTwigInstances);
                 
-                // Create twig geometry
-                const twigGeometry = createTwigGeometry(twigType, scale);
-                
-                // Position the twig
-                twigGeometry.position.set(position.x, position.y, position.z);
-                
-                // Apply quaternion rotation
-                const quaternion = new THREE.Quaternion(orientationX, orientationY, orientationZ, orientationW);
-                twigGeometry.setRotationFromQuaternion(quaternion);
-                
-                // Enable shadows
-                twigGeometry.traverse((child) => {
-                    if (child instanceof THREE.Mesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
+                for (let i = 0; i < instanceCount; i++) {
+                    const position = tree.twig_position(i);
+                    const scale = tree.twig_scale(i);
+                    const orientationX = tree.twig_orientation_x(i);
+                    const orientationY = tree.twig_orientation_y(i);
+                    const orientationZ = tree.twig_orientation_z(i);
+                    const orientationW = tree.twig_orientation_w(i);
+                    
+                    if (position && scale !== null && 
+                        orientationX !== null && orientationY !== null && 
+                        orientationZ !== null && orientationW !== null) {
+                        
+                        // Apply scale from twig library
+                        const selectedTwig = twigLibrary?.twigs.find(t => t.id === selectedTwigType);
+                        const finalScale = scale * (selectedTwig?.defaultScale || 1.0);
+                        
+                        // Create transform matrix
+                        const quaternion = new THREE.Quaternion(orientationX, orientationY, orientationZ, orientationW);
+                        matrix.compose(
+                            new THREE.Vector3(position.x, position.y, position.z),
+                            quaternion,
+                            new THREE.Vector3(finalScale, finalScale, finalScale)
+                        );
+                        
+                        // Set the same transform for all instanced meshes
+                        twigInstancedMeshes.forEach(mesh => {
+                            mesh.setMatrixAt(i, matrix);
+                        });
                     }
+                }
+                
+                // Notify Three.js that instance data changed for all meshes
+                twigInstancedMeshes.forEach(mesh => {
+                    mesh.instanceMatrix.needsUpdate = true;
                 });
                 
-                scene.add(twigGeometry);
-                twigMeshes.push(twigGeometry as any); // Store for cleanup
+                console.log(`Created ${twigInstancedMeshes.length} instanced meshes with ${instanceCount} instances each (limited from ${twigCount} total)`);
             }
+        } else {
+            // Use individual meshes for procedural twigs (they're lightweight)
+            const twigPromises: Promise<void>[] = [];
+            const maxProceduralTwigs = 500; // Even procedural twigs should be limited
+            const proceduralCount = Math.min(twigCount, maxProceduralTwigs);
+            
+            for (let i = 0; i < proceduralCount; i++) {
+                const position = tree.twig_position(i);
+                const scale = tree.twig_scale(i);
+                const twigType = tree.twig_type(i);
+                const orientationX = tree.twig_orientation_x(i);
+                const orientationY = tree.twig_orientation_y(i);
+                const orientationZ = tree.twig_orientation_z(i);
+                const orientationW = tree.twig_orientation_w(i);
+                
+                if (position && scale !== null && twigType && 
+                    orientationX !== null && orientationY !== null && 
+                    orientationZ !== null && orientationW !== null) {
+                    
+                    // Create async task for each twig
+                    const twigPromise = createTwigGeometry(twigType, scale).then((twigGeometry) => {
+                        if (twigGeometry) {
+                            // Position the twig
+                            twigGeometry.position.set(position.x, position.y, position.z);
+                            
+                            // Apply quaternion rotation
+                            const quaternion = new THREE.Quaternion(orientationX, orientationY, orientationZ, orientationW);
+                            twigGeometry.setRotationFromQuaternion(quaternion);
+                            
+                            // Enable shadows
+                            twigGeometry.traverse((child) => {
+                                if (child instanceof THREE.Mesh) {
+                                    child.castShadow = true;
+                                    child.receiveShadow = true;
+                                }
+                            });
+                            
+                            scene.add(twigGeometry);
+                            twigMeshes.push(twigGeometry as any); // Store for cleanup
+                        }
+                    });
+                    
+                    twigPromises.push(twigPromise);
+                }
+            }
+            
+            // Wait for all procedural twigs to load
+            await Promise.all(twigPromises);
+            
+            console.log(`Created ${twigMeshes.length} procedural twig instances (limited from ${twigCount} total)`);
         }
-        
-        console.log(`Created ${twigMeshes.length} twig instances`);
     }
 };
 
 // Create initial tree visualization
-createTreeVisualization();
+createTreeVisualization().catch(error => {
+    console.error('Error creating initial tree visualization:', error);
+});
 
 // Improved lighting setup
-const ambientLight = new THREE.AmbientLight(0x404040, 0.4); // Soft ambient light
+const ambientLight = new THREE.AmbientLight(0x909090, 0.7); // Soft ambient light
 scene.add(ambientLight);
 
 // Main directional light (sun)
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
 directionalLight.position.set(10, 10, 5);
 directionalLight.castShadow = true;
 directionalLight.shadow.mapSize.width = 2048;
@@ -318,8 +733,34 @@ controls.dampingFactor = 0.05;
 const gui = new dat.GUI({ width: 320 });
 const treeFolder = gui.addFolder('Tree Parameters');
 
-const redrawTree = () => {
-    createTreeVisualization();
+// Update bark material for all tree meshes
+const updateBarkMaterial = async () => {
+    try {
+        const newMaterial = await createBarkMaterial(selectedBarkType);
+        
+        // Update all ring meshes with new material
+        ringMeshes.forEach(mesh => {
+            // Dispose old material
+            if (mesh.material instanceof THREE.Material) {
+                mesh.material.dispose();
+            }
+            mesh.material = newMaterial.clone();
+        });
+        
+        // Store the updated material as the new default
+        ringMaterial.dispose();
+        ringMaterial = newMaterial;
+        
+        console.log(`Updated bark material to: ${selectedBarkType}`);
+    } catch (error) {
+        console.error('Error updating bark material:', error);
+    }
+};
+
+function redrawTree() {
+    createTreeVisualization().catch(error => {
+        console.error('Error redrawing tree:', error);
+    });
 }
 
 treeFolder.add(treeParams, 'height', 0.1, 10).onChange((value: number) => {
@@ -506,7 +947,116 @@ twigFolder.add(treeParams, 'twigAngleVariation', 0.0, 1.0).name('Angle Variation
     redrawTree();
 });
 
+// Add twig library controls
+if (twigLibrary) {
+    const twigLibraryFolder = gui.addFolder('Twig Library');
+    
+    // Create options object for dropdown
+    const twigOptions: { [key: string]: string } = {};
+    twigLibrary.twigs.forEach(twig => {
+        twigOptions[twig.name] = twig.id;
+    });
+    
+    const twigLibraryParams = {
+        selectedTwig: selectedTwigType
+    };
+    
+    twigLibraryFolder.add(twigLibraryParams, 'selectedTwig', twigOptions).name('Twig Type').onChange((value: string) => {
+        selectedTwigType = value;
+        console.log(`Selected twig type: ${selectedTwigType}`);
+        redrawTree();
+    });
+    
+    // Add info display for selected twig
+    const selectedTwigInfo = twigLibrary.twigs.find(t => t.id === selectedTwigType);
+    if (selectedTwigInfo) {
+        const infoParams = {
+            description: selectedTwigInfo.description,
+            type: selectedTwigInfo.type
+        };
+        
+        twigLibraryFolder.add(infoParams, 'description').name('Description').listen();
+        twigLibraryFolder.add(infoParams, 'type').name('Type').listen();
+    }
+    
+    twigLibraryFolder.open();
+}
+
 twigFolder.open();
+
+// Add bark texture controls
+if (barkLibrary) {
+    const barkFolder = gui.addFolder('Bark Textures');
+    
+    // Create options object for dropdown
+    const barkOptions: { [key: string]: string } = {};
+    barkLibrary.textures.forEach(texture => {
+        barkOptions[texture.name] = texture.id;
+    });
+    
+    const barkParams = {
+        selectedBark: selectedBarkType
+    };
+    
+    barkFolder.add(barkParams, 'selectedBark', barkOptions).name('Bark Type').onChange((value: string) => {
+        selectedBarkType = value;
+        console.log(`Selected bark type: ${selectedBarkType}`);
+        updateBarkMaterial();
+    });
+    
+    // Add info display for selected bark
+    const selectedBarkInfo = barkLibrary.textures.find(t => t.id === selectedBarkType);
+    if (selectedBarkInfo) {
+        const barkInfoParams = {
+            description: selectedBarkInfo.description,
+            type: selectedBarkInfo.type
+        };
+        
+        barkFolder.add(barkInfoParams, 'description').name('Description').listen();
+        barkFolder.add(barkInfoParams, 'type').name('Type').listen();
+    }
+    
+    barkFolder.open();
+}
+
+// Add export controls
+const exportFolder = gui.addFolder('Export');
+
+// Download GLTF function
+const downloadGltf = () => {
+    try {
+        console.log('Exporting GLTF...');
+        const gltfJson = tree.export_gltf(16); // Use same resolution as mesh generation
+        console.log('GLTF exported successfully');
+        
+        // Create blob and download
+        const blob = new Blob([gltfJson], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        // Create download link
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `tree_${Date.now()}.gltf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Clean up object URL
+        URL.revokeObjectURL(url);
+        
+        console.log('GLTF file downloaded');
+    } catch (error) {
+        console.error('Error exporting GLTF:', error);
+        alert('Failed to export GLTF file. Check console for details.');
+    }
+};
+
+const exportParams = {
+    downloadGltf: downloadGltf
+};
+
+exportFolder.add(exportParams, 'downloadGltf').name('Download GLTF');
+exportFolder.open();
 
 // Animation loop
 function animate() {

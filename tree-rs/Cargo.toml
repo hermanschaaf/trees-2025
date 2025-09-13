@@ -20,6 +20,9 @@ rand = { version = "0.8", features = ["small_rng"] }
 getrandom = { version = "0.2", features = ["js"] }
 rand_distr = "0.4"
 console_error_panic_hook = { version = "0.1.6", optional = true }
+gltf-json = "1.4"
+base64 = "0.22"
+serde_json = "1.0"
 
 [features]
 default = ["console_error_panic_hook"]

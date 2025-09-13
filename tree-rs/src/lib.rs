@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
 use glam::Vec2;
+use std::collections::BTreeMap;
 
 mod wasm_math;
 mod tree_structure;
@@ -209,9 +210,14 @@ impl TreeObject {
                 attachment_threshold: 0.05, // Attach twigs to branches with radius < 0.05
             };
             
-            // Find termination points in all cross-sections
+            // Find termination points in all cross-sections (excluding roots)
             for (i, cross_section) in self.tree.cross_sections.iter().enumerate() {
                 for ring in &cross_section.component_rings {
+                    // Skip root rings - don't generate twigs on roots
+                    if matches!(ring.ring_type, tree_structure::RingType::Root { .. }) {
+                        continue;
+                    }
+                    
                     // Check if this is a termination point (small radius or no children)
                     let is_termination = ring.radius <= twig_params.attachment_threshold 
                         || cross_section.children_indices.is_empty();
@@ -986,7 +992,9 @@ impl TreeObject {
             let root_ring = tree_structure::ComponentRing {
                 offset: connection_offset,
                 radius: root_radius,
-                ring_type: tree_structure::RingType::SideBranch,
+                ring_type: tree_structure::RingType::Root { 
+                    root_type: tree_structure::RootType::LateralRoot 
+                },
                 parent_ring_id: None,
                 children_ring_ids: Vec::new(),
             };
@@ -1070,7 +1078,9 @@ impl TreeObject {
         let next_ring = tree_structure::ComponentRing {
             offset: Vec2::ZERO, // Keep simple for root segments
             radius: next_radius,
-            ring_type: tree_structure::RingType::SideBranch,
+            ring_type: tree_structure::RingType::Root { 
+                root_type: tree_structure::RootType::LateralRoot 
+            },
             parent_ring_id: None,
             children_ring_ids: Vec::new(),
         };
@@ -1332,6 +1342,220 @@ impl TreeObject {
     pub fn set_twig_angle_variation(&mut self, variation: f32) {
         self.twig_angle_variation = variation.max(0.0).min(1.0); // Clamp between 0.0 and 1.0
         self.regenerate_tree();
+    }
+
+    /// Export the tree as a GLTF file (returns JSON as string)
+    pub fn export_gltf(&self, resolution: u32) -> Result<String, JsValue> {
+        let mesh = self.generate_tree_mesh(resolution);
+        
+        // Create GLTF JSON structure
+        let mut root = gltf_json::Root::default();
+        
+        // Create scene
+        let scene_index = root.push(gltf_json::Scene {
+            extensions: Default::default(),
+            extras: Default::default(),
+            nodes: vec![gltf_json::Index::new(0)],
+        });
+        root.scene = Some(gltf_json::Index::new(0)); // Scene index is always 0
+
+        // Create node
+        root.push(gltf_json::Node {
+            camera: None,
+            children: None,
+            extensions: Default::default(),
+            extras: Default::default(),
+            matrix: None,
+            mesh: Some(gltf_json::Index::new(0)),
+            rotation: None,
+            scale: None,
+            translation: None,
+            skin: None,
+            weights: None,
+        });
+
+        // Create mesh
+        root.push(gltf_json::Mesh {
+            extensions: Default::default(),
+            extras: Default::default(),
+            primitives: vec![gltf_json::mesh::Primitive {
+                attributes: {
+                    let mut map = BTreeMap::new();
+                    map.insert(
+                        gltf_json::validation::Checked::Valid(gltf_json::mesh::Semantic::Positions),
+                        gltf_json::Index::new(0), // Position accessor
+                    );
+                    map.insert(
+                        gltf_json::validation::Checked::Valid(gltf_json::mesh::Semantic::Normals),
+                        gltf_json::Index::new(1), // Normal accessor
+                    );
+                    map.insert(
+                        gltf_json::validation::Checked::Valid(gltf_json::mesh::Semantic::TexCoords(0)),
+                        gltf_json::Index::new(2), // UV accessor
+                    );
+                    map
+                },
+                extensions: Default::default(),
+                extras: Default::default(),
+                indices: Some(gltf_json::Index::new(3)), // Index accessor
+                material: None,
+                mode: gltf_json::validation::Checked::Valid(gltf_json::mesh::Mode::Triangles),
+                targets: None,
+            }],
+            weights: None,
+        });
+
+        // Create buffer data
+        let vertices_bytes = mesh.vertices.iter()
+            .flat_map(|f| f.to_le_bytes().to_vec())
+            .collect::<Vec<u8>>();
+        
+        let normals_bytes = mesh.normals.iter()
+            .flat_map(|f| f.to_le_bytes().to_vec())
+            .collect::<Vec<u8>>();
+            
+        let uvs_bytes = mesh.uvs.iter()
+            .flat_map(|f| f.to_le_bytes().to_vec())
+            .collect::<Vec<u8>>();
+            
+        let indices_bytes = mesh.indices.iter()
+            .flat_map(|i| i.to_le_bytes().to_vec())
+            .collect::<Vec<u8>>();
+
+        // Combine all data into single buffer
+        let mut buffer_data = Vec::new();
+        let vertices_offset = 0;
+        let normals_offset = vertices_bytes.len();
+        let uvs_offset = normals_offset + normals_bytes.len();
+        let indices_offset = uvs_offset + uvs_bytes.len();
+        
+        buffer_data.extend(vertices_bytes);
+        buffer_data.extend(normals_bytes);
+        buffer_data.extend(uvs_bytes);
+        buffer_data.extend(indices_bytes);
+
+        // Create buffer
+        use base64::Engine as _;
+        let buffer_data_base64 = base64::engine::general_purpose::STANDARD.encode(&buffer_data);
+        let buffer_uri = format!("data:application/octet-stream;base64,{}", buffer_data_base64);
+        
+        root.push(gltf_json::Buffer {
+            byte_length: gltf_json::validation::USize64::from(buffer_data.len()),
+            extensions: Default::default(),
+            extras: Default::default(),
+            uri: Some(buffer_uri),
+        });
+
+        // Create buffer view for vertices
+        root.push(gltf_json::buffer::View {
+            buffer: gltf_json::Index::new(0),
+            byte_length: gltf_json::validation::USize64::from(mesh.vertices.len() * 4),
+            byte_offset: Some(gltf_json::validation::USize64::from(vertices_offset as usize)),
+            byte_stride: None,
+            extensions: Default::default(),
+            extras: Default::default(),
+            target: Some(gltf_json::validation::Checked::Valid(gltf_json::buffer::Target::ArrayBuffer)),
+        });
+
+        // Create buffer view for normals
+        root.push(gltf_json::buffer::View {
+            buffer: gltf_json::Index::new(0),
+            byte_length: gltf_json::validation::USize64::from(mesh.normals.len() * 4),
+            byte_offset: Some(gltf_json::validation::USize64::from(normals_offset as usize)),
+            byte_stride: None,
+            extensions: Default::default(),
+            extras: Default::default(),
+            target: Some(gltf_json::validation::Checked::Valid(gltf_json::buffer::Target::ArrayBuffer)),
+        });
+
+        // Create buffer view for UVs
+        root.push(gltf_json::buffer::View {
+            buffer: gltf_json::Index::new(0),
+            byte_length: gltf_json::validation::USize64::from(mesh.uvs.len() * 4),
+            byte_offset: Some(gltf_json::validation::USize64::from(uvs_offset as usize)),
+            byte_stride: None,
+            extensions: Default::default(),
+            extras: Default::default(),
+            target: Some(gltf_json::validation::Checked::Valid(gltf_json::buffer::Target::ArrayBuffer)),
+        });
+
+        // Create buffer view for indices
+        root.push(gltf_json::buffer::View {
+            buffer: gltf_json::Index::new(0),
+            byte_length: gltf_json::validation::USize64::from(mesh.indices.len() * 4),
+            byte_offset: Some(gltf_json::validation::USize64::from(indices_offset as usize)),
+            byte_stride: None,
+            extensions: Default::default(),
+            extras: Default::default(),
+            target: Some(gltf_json::validation::Checked::Valid(gltf_json::buffer::Target::ElementArrayBuffer)),
+        });
+
+        // Create accessors
+        // Position accessor
+        root.push(gltf_json::Accessor {
+            buffer_view: Some(gltf_json::Index::new(0)),
+            byte_offset: Some(gltf_json::validation::USize64::from(0_usize)),
+            component_type: gltf_json::validation::Checked::Valid(gltf_json::accessor::GenericComponentType(gltf_json::accessor::ComponentType::F32)),
+            count: gltf_json::validation::USize64::from(mesh.vertices.len() / 3),
+            extensions: Default::default(),
+            extras: Default::default(),
+            type_: gltf_json::validation::Checked::Valid(gltf_json::accessor::Type::Vec3),
+            min: None,
+            max: None,
+            normalized: false,
+            sparse: None,
+        });
+
+        // Normal accessor
+        root.push(gltf_json::Accessor {
+            buffer_view: Some(gltf_json::Index::new(1)),
+            byte_offset: Some(gltf_json::validation::USize64::from(0_usize)),
+            component_type: gltf_json::validation::Checked::Valid(gltf_json::accessor::GenericComponentType(gltf_json::accessor::ComponentType::F32)),
+            count: gltf_json::validation::USize64::from(mesh.normals.len() / 3),
+            extensions: Default::default(),
+            extras: Default::default(),
+            type_: gltf_json::validation::Checked::Valid(gltf_json::accessor::Type::Vec3),
+            min: None,
+            max: None,
+            normalized: false,
+            sparse: None,
+        });
+
+        // UV accessor
+        root.push(gltf_json::Accessor {
+            buffer_view: Some(gltf_json::Index::new(2)),
+            byte_offset: Some(gltf_json::validation::USize64::from(0_usize)),
+            component_type: gltf_json::validation::Checked::Valid(gltf_json::accessor::GenericComponentType(gltf_json::accessor::ComponentType::F32)),
+            count: gltf_json::validation::USize64::from(mesh.uvs.len() / 2),
+            extensions: Default::default(),
+            extras: Default::default(),
+            type_: gltf_json::validation::Checked::Valid(gltf_json::accessor::Type::Vec2),
+            min: None,
+            max: None,
+            normalized: false,
+            sparse: None,
+        });
+
+        // Index accessor
+        root.push(gltf_json::Accessor {
+            buffer_view: Some(gltf_json::Index::new(3)),
+            byte_offset: Some(gltf_json::validation::USize64::from(0_usize)),
+            component_type: gltf_json::validation::Checked::Valid(gltf_json::accessor::GenericComponentType(gltf_json::accessor::ComponentType::U32)),
+            count: gltf_json::validation::USize64::from(mesh.indices.len()),
+            extensions: Default::default(),
+            extras: Default::default(),
+            type_: gltf_json::validation::Checked::Valid(gltf_json::accessor::Type::Scalar),
+            min: None,
+            max: None,
+            normalized: false,
+            sparse: None,
+        });
+
+        // Serialize to JSON
+        match serde_json::to_string_pretty(&root) {
+            Ok(json) => Ok(json),
+            Err(e) => Err(JsValue::from_str(&format!("Failed to serialize GLTF: {}", e))),
+        }
     }
 }
 

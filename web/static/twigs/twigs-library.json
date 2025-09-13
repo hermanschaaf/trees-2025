@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "description": "Twig library metadata for the 3D tree generator",
+  "twigs": [
+    {
+      "id": "procedural",
+      "name": "Procedural Twigs",
+      "description": "Generated procedurally using basic geometries",
+      "type": "procedural",
+      "filename": null,
+      "defaultScale": 1.0,
+      "preview": {
+        "thumbnail": null,
+        "description": "Simple procedural leaves and branches"
+      }
+    },
+    {
+      "id": "basic-leaf-cluster",
+      "name": "Basic Leaf Cluster",
+      "description": "A simple cluster of leaves",
+      "type": "gltf",
+      "filename": "twig.004.gltf",
+      "defaultScale": 1.0,
+      "preview": {
+        "thumbnail": "TexturesCom_Branches0025_1_M.png",
+        "description": "Small cluster of green leaves"
+      }
+    }
+  ]
+}
