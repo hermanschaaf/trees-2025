@@ -821,30 +821,53 @@ impl TreeObject {
         segment_length_variation: f32,
     ) {
         use rand::Rng;
-        use glam::{Vec3, Quat};
+        use glam::{Vec3, Quat, Vec2};
         use std::f32::consts::PI;
         
-        let root_cross_section = &cross_sections[root_cross_section_index];
-        let root_center = root_cross_section.center;
+        // Clone the data we need before mutating the vector
+        let (root_center, parent_rings) = {
+            let root_cross_section = &cross_sections[root_cross_section_index];
+            (root_cross_section.center, root_cross_section.component_rings.clone())
+        };
+        
+        // Distribute roots among available parent rings
+        let rings_per_root = (parent_rings.len() as f32 / root_density as f32).max(1.0);
         
         // Create main roots radiating outward and downward
         for i in 0..root_density {
             let angle = (i as f32 / root_density as f32) * 2.0 * PI;
             let horizontal_direction = Vec3::new(angle.cos(), 0.0, angle.sin());
             
-            // Root direction: mostly down but angled outward
-            let downward_angle = rng.gen_range(30.0f32..60.0f32).to_radians(); // 30-60 degrees from vertical
+            // Root direction: mostly down but angled outward, influenced by root_spread
+            let base_downward_angle = 45.0f32.to_radians(); // Base 45 degrees from vertical
+            let spread_influence = (root_spread - 1.0) * 15.0; // spread affects angle by ±15 degrees
+            let downward_angle = (base_downward_angle + spread_influence.to_radians()).clamp(20.0f32.to_radians(), 70.0f32.to_radians());
+            
             let root_direction = Vec3::new(
                 horizontal_direction.x * downward_angle.sin(),
                 -downward_angle.cos(), // Negative Y = downward
                 horizontal_direction.z * downward_angle.sin(),
             ).normalize();
             
-            // Create root starting ring (smaller than trunk)
+            // Select parent ring for this root (distribute evenly)
+            let parent_ring_index = ((i as f32 * rings_per_root) as usize).min(parent_rings.len() - 1);
+            let parent_ring = &parent_rings[parent_ring_index];
+            
+            // Position root connection point on the edge of parent ring, in root direction
+            let connection_offset = Vec2::new(
+                horizontal_direction.x * parent_ring.radius * root_spread,
+                horizontal_direction.z * parent_ring.radius * root_spread,
+            );
+            
+            // Calculate initial root radius with tapering from parent
+            let parent_radius = parent_ring.radius;
+            let root_radius = parent_radius * 0.4; // Roots start smaller than their parent
+            
+            // Create root starting ring
             let root_ring = tree_structure::ComponentRing {
-                offset: glam::Vec2::ZERO, // Roots start from center
-                radius: 0.15, // Smaller than trunk rings
-                ring_type: tree_structure::RingType::SideBranch, // Use SideBranch type for roots
+                offset: connection_offset,
+                radius: root_radius,
+                ring_type: tree_structure::RingType::SideBranch,
                 parent_ring_id: None,
                 children_ring_ids: Vec::new(),
             };
@@ -868,13 +891,14 @@ impl TreeObject {
                 cross_sections,
                 root_cs_index,
                 root_direction,
-                0, // depth
+                1, // Start at depth 1
                 rng,
                 root_segment_length,
                 root_depth,
                 root_spread,
                 radius_taper,
                 segment_length_variation,
+                root_radius, // Pass initial radius for tapering
             );
         }
     }
@@ -890,22 +914,21 @@ impl TreeObject {
         root_spread: f32,
         radius_taper: f32,
         segment_length_variation: f32,
+        current_radius: f32,
     ) {
         use rand::Rng;
-        use glam::{Vec3, Quat};
+        use glam::{Vec3, Quat, Vec2};
         
-        // Stop if too deep or too small
-        if depth > 15 {
+        // Stop if too deep, too small, or reached max depth
+        if depth > 15 || current_radius < 0.01 {
             return;
         }
         
         let current_cross_section = &cross_sections[current_cross_section_index];
         let current_center = current_cross_section.center;
-        let current_rings = current_cross_section.component_rings.clone();
         
-        // Stop if rings too small or we've gone too deep
-        let max_radius = current_rings.iter().map(|r| r.radius).fold(0.0, f32::max);
-        if max_radius < 0.01 || current_center.y < -max_root_depth {
+        // Stop if we've gone too deep below ground
+        if current_center.y < -max_root_depth {
             return;
         }
         
@@ -921,35 +944,46 @@ impl TreeObject {
         
         let next_center = current_center + bent_direction * varied_segment_length;
         
-        // Root tapering - more aggressive than trunk
-        let root_taper_factor = 0.15; // More aggressive tapering for roots
-        let segment_taper = 1.0 - (1.0 - radius_taper) * root_taper_factor;
+        // Apply aggressive tapering for roots
+        let next_radius = current_radius * radius_taper * 0.9; // Extra aggressive tapering for roots
         
-        // Create tapered child rings
-        let mut child_rings = Vec::new();
-        for parent_ring in &current_rings {
-            let child_ring = Self::create_child_ring_from_parent(
-                parent_ring,
-                tree_structure::RingId { cross_section_index: current_cross_section_index, ring_index: 0 },
-                segment_taper,
-            );
-            child_rings.push(child_ring);
-        }
+        // Create next root segment
+        let next_ring = tree_structure::ComponentRing {
+            offset: Vec2::ZERO, // Keep simple for root segments
+            radius: next_radius,
+            ring_type: tree_structure::RingType::SideBranch,
+            parent_ring_id: None,
+            children_ring_ids: Vec::new(),
+        };
         
-        // Create next root cross-section
-        let new_cross_section = tree_structure::BranchCrossSection {
+        let next_cross_section = tree_structure::BranchCrossSection {
             center: next_center,
-            orientation: Quat::from_rotation_arc(Vec3::Y, bent_direction),
-            component_rings: child_rings,
+            orientation: glam::Quat::from_rotation_arc(Vec3::Y, bent_direction),
+            component_rings: vec![next_ring],
             parent_index: Some(current_cross_section_index),
             children_indices: Vec::new(),
         };
         
-        let new_cross_section_index = cross_sections.len();
-        cross_sections[current_cross_section_index].children_indices.push(new_cross_section_index);
-        cross_sections.push(new_cross_section);
+        let next_cs_index = cross_sections.len();
+        cross_sections[current_cross_section_index].children_indices.push(next_cs_index);
+        cross_sections.push(next_cross_section);
         
-        // Occasionally branch roots
+        // Continue root growth
+        Self::generate_root_recursive_static(
+            cross_sections,
+            next_cs_index,
+            bent_direction,
+            depth + 1,
+            rng,
+            segment_length,
+            max_root_depth,
+            root_spread,
+            radius_taper,
+            segment_length_variation,
+            next_radius,
+        );
+        
+        // Occasionally create side root branches
         let should_branch = depth > 2 && rng.gen_range(0.0..=1.0) < 0.3; // 30% chance to branch
         
         if should_branch && depth < 10 {
@@ -959,46 +993,21 @@ impl TreeObject {
             let branch_rotation = Quat::from_axis_angle(branch_axis, branch_angle);
             let branch_direction = (branch_rotation * bent_direction).normalize();
             
-            // Continue main root
-            Self::generate_root_recursive_static(
-                cross_sections,
-                new_cross_section_index,
-                bent_direction,
-                depth + 1,
-                rng,
-                segment_length,
-                max_root_depth,
-                root_spread,
-                radius_taper,
-                segment_length_variation,
-            );
+            // Branch starts smaller than main root
+            let branch_radius = current_radius * 0.6;
             
-            // Create branch root
             Self::generate_root_recursive_static(
                 cross_sections,
-                new_cross_section_index,
+                next_cs_index,
                 branch_direction,
                 depth + 1,
                 rng,
-                segment_length * 0.7, // Shorter segments for branch roots
+                segment_length * 0.8, // Shorter segments for branches
                 max_root_depth,
                 root_spread,
                 radius_taper,
                 segment_length_variation,
-            );
-        } else {
-            // Continue single root
-            Self::generate_root_recursive_static(
-                cross_sections,
-                new_cross_section_index,
-                bent_direction,
-                depth + 1,
-                rng,
-                segment_length,
-                max_root_depth,
-                root_spread,
-                radius_taper,
-                segment_length_variation,
+                branch_radius,
             );
         }
     }
