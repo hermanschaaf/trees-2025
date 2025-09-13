@@ -63,7 +63,7 @@ const createTreeVisualization = () => {
     ringMeshes = [];
     
     // Generate mesh from Rust
-    const treeMesh = tree.generate_tree_mesh(16); // 16 points per ring
+    const treeMesh = tree.generate_tree_mesh(6); // 16 points per ring
     
     if (treeMesh.vertices.length > 0) {
         // Create Three.js geometry from the generated mesh

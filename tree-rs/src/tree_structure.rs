@@ -2,8 +2,7 @@ use glam::{Vec2, Vec3, Quat};
 
 #[derive(Debug)]
 pub struct TreeStructure {
-    pub rings: Vec<TreeRing>,
-    pub root_index: usize,      // Usually 0, but flexible
+    pub cross_sections: Vec<BranchCrossSection>,
 
     // Metadata
     pub species_params: TreeSpecies,
@@ -12,15 +11,49 @@ pub struct TreeStructure {
 }
 
 #[derive(Debug, Clone)]
-pub struct TreeRing {
+pub struct BranchCrossSection {
     // Geometric properties
     pub center: Vec3,           // Position in 3D space
-    pub radius: f32,            // Ring radius
-    pub orientation: Quat,      // Ring orientation (normal direction)
+    pub orientation: Quat,      // Cross-section orientation
 
-    // Connectivity
-    pub parent_index: Option<usize>,  // Index of parent ring
-    pub children_indices: Vec<usize>, // Indices of child rings
+    // Component rings at this position
+    pub component_rings: Vec<ComponentRing>,
+
+    // Cross-section level connectivity
+    pub parent_index: Option<usize>,  // Index of parent cross-section
+    pub children_indices: Vec<usize>, // Indices of child cross-sections
+}
+
+#[derive(Debug, Clone)]
+pub struct ComponentRing {
+    // Local geometric properties
+    pub offset: Vec2,           // Offset from cross-section center (local coordinates)
+    pub radius: f32,            // Ring radius
+    pub ring_type: RingType,    // What type of branch/root this ring represents
+
+    // Ring level connectivity
+    pub parent_ring_id: Option<RingId>,     // Parent ring (may be in different cross-section)
+    pub children_ring_ids: Vec<RingId>,     // Child rings (may be in different cross-sections)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RingId {
+    pub cross_section_index: usize,
+    pub ring_index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum RingType {
+    MainTrunk,
+    SideBranch,
+    Root { root_type: RootType },
+}
+
+#[derive(Debug, Clone)]
+pub enum RootType {
+    TapRoot,        // Deep central root
+    LateralRoot,    // Horizontal spreading roots
+    FeederRoot,     // Small surface roots
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +73,14 @@ pub struct RingMesh {
 }
 
 #[derive(Debug, Clone)]
+pub struct CrossSectionGeometry {
+    pub points: Vec<Vec3>,      // Points around the unified perimeter
+    pub normals: Vec<Vec3>,     // Normal at each point
+    pub tangents: Vec<Vec3>,    // For bark texture orientation
+    pub section_normal: Vec3,   // Overall cross-section direction
+}
+
+#[derive(Debug, Clone)]
 pub struct RingGeometry {
     pub points: Vec<Vec3>,      // Points around the ring circumference
     pub normals: Vec<Vec3>,     // Normal at each point
@@ -50,23 +91,35 @@ pub struct RingGeometry {
 impl TreeStructure {
     pub fn new(tree_species: TreeSpecies) -> TreeStructure {
         TreeStructure{
-            rings: Vec::new(),
-            root_index: 0,
+            cross_sections: Vec::new(),
             species_params: tree_species.clone(),
             age: 0.0,
             overall_health: 0.0,
         }
     }
 
-    pub fn add_ring(&mut self, parent_idx: usize, ring: TreeRing) -> usize {
-        let new_idx = self.rings.len();
-        self.rings[parent_idx].children_indices.push(new_idx);
+    pub fn add_cross_section(&mut self, parent_idx: Option<usize>, cross_section: BranchCrossSection) -> usize {
+        let new_idx = self.cross_sections.len();
+        
+        if let Some(parent) = parent_idx {
+            self.cross_sections[parent].children_indices.push(new_idx);
+        }
 
-        let mut new_ring = ring;
-        new_ring.parent_index = Some(parent_idx);
-        self.rings.push(new_ring);
+        let mut new_cross_section = cross_section;
+        new_cross_section.parent_index = parent_idx;
+        self.cross_sections.push(new_cross_section);
 
         new_idx
+    }
+
+    pub fn add_component_ring(&mut self, cross_section_idx: usize, ring: ComponentRing) -> RingId {
+        let ring_idx = self.cross_sections[cross_section_idx].component_rings.len();
+        self.cross_sections[cross_section_idx].component_rings.push(ring);
+        
+        RingId {
+            cross_section_index: cross_section_idx,
+            ring_index: ring_idx,
+        }
     }
 
     pub fn generate_mesh(&self, ring_resolution: u32) -> RingMesh {
@@ -75,19 +128,18 @@ impl TreeStructure {
         let mut uvs = Vec::new();
         let mut indices = Vec::new();
 
-        // Generate geometry for each ring (just perimeter points, no faces)
-        let ring_geometries: Vec<RingGeometry> = self.rings
+        // Generate geometry for each cross-section (unified perimeter from multiple rings)
+        let cross_section_geometries: Vec<CrossSectionGeometry> = self.cross_sections
             .iter()
-            .map(|ring| ring.generate_geometry(ring_resolution))
+            .map(|cross_section| cross_section.generate_unified_geometry(ring_resolution))
             .collect();
 
-        // Connect parent rings to children with tubular surfaces
-        // This creates the actual tree mesh by connecting ring perimeters
-        for (ring_idx, ring) in self.rings.iter().enumerate() {
-            for &child_idx in &ring.children_indices {
-                self.connect_ring_perimeters(
-                    &ring_geometries[ring_idx],
-                    &ring_geometries[child_idx],
+        // Connect parent cross-sections to children with tubular surfaces
+        for (cs_idx, cross_section) in self.cross_sections.iter().enumerate() {
+            for &child_idx in &cross_section.children_indices {
+                self.connect_cross_section_perimeters(
+                    &cross_section_geometries[cs_idx],
+                    &cross_section_geometries[child_idx],
                     &mut vertices,
                     &mut normals,
                     &mut uvs,
@@ -100,10 +152,10 @@ impl TreeStructure {
     }
 
 
-    fn connect_ring_perimeters(
+    fn connect_cross_section_perimeters(
         &self,
-        parent_geo: &RingGeometry,
-        child_geo: &RingGeometry,
+        parent_geo: &CrossSectionGeometry,
+        child_geo: &CrossSectionGeometry,
         vertices: &mut Vec<Vec3>,
         normals: &mut Vec<Vec3>,
         uvs: &mut Vec<Vec2>,
@@ -324,8 +376,36 @@ impl TreeStructure {
     }
 }
 
-impl TreeRing {
-    pub fn generate_geometry(&self, resolution: u32) -> RingGeometry {
+impl BranchCrossSection {
+    pub fn generate_unified_geometry(&self, resolution: u32) -> CrossSectionGeometry {
+        let mut points = Vec::new();
+        let mut normals = Vec::new();
+        let mut tangents = Vec::new();
+
+        // For now, simple approach: if multiple rings, sample around the union of circles
+        // TODO: Later implement proper CSG operations for complex shapes
+        
+        if self.component_rings.is_empty() {
+            // No rings - return empty geometry
+            return CrossSectionGeometry {
+                points,
+                normals,
+                tangents,
+                section_normal: self.orientation * Vec3::Y,
+            };
+        }
+
+        if self.component_rings.len() == 1 {
+            // Single ring - use traditional circular geometry
+            let ring = &self.component_rings[0];
+            return self.generate_single_ring_geometry(ring, resolution);
+        }
+
+        // Multiple rings - generate unified perimeter
+        self.generate_multi_ring_geometry(resolution)
+    }
+
+    fn generate_single_ring_geometry(&self, ring: &ComponentRing, resolution: u32) -> CrossSectionGeometry {
         let mut points = Vec::with_capacity(resolution as usize);
         let mut normals = Vec::with_capacity(resolution as usize);
         let mut tangents = Vec::with_capacity(resolution as usize);
@@ -335,11 +415,11 @@ impl TreeRing {
             let angle = (i as f32 / resolution as f32) * 2.0 * std::f32::consts::PI;
 
             // Local ring coordinates in XZ plane (horizontal ring)
-            let local_x = angle.cos() * self.radius;
-            let local_z = angle.sin() * self.radius;
+            let local_x = angle.cos() * ring.radius + ring.offset.x;
+            let local_z = angle.sin() * ring.radius + ring.offset.y; // offset.y maps to local Z
             let local_point = Vec3::new(local_x, 0.0, local_z);
 
-            // Transform to world space using ring orientation
+            // Transform to world space using cross-section orientation
             let world_point = self.center + self.orientation * local_point;
             let world_normal = self.orientation * local_point.normalize();
             let world_tangent = self.orientation * Vec3::new(-local_z, 0.0, local_x).normalize();
@@ -349,11 +429,68 @@ impl TreeRing {
             tangents.push(world_tangent);
         }
 
-        RingGeometry {
+        CrossSectionGeometry {
             points,
             normals,
             tangents,
-            ring_normal: self.orientation * Vec3::Y, // Y is up, so ring normal is Y
+            section_normal: self.orientation * Vec3::Y,
+        }
+    }
+
+    fn generate_multi_ring_geometry(&self, resolution: u32) -> CrossSectionGeometry {
+        // For overlapping circles, we need to find the unified perimeter
+        // Simple approach: sample around each circle and find the outer envelope
+        
+        let mut envelope_points = Vec::new();
+        
+        // Sample points around each ring
+        for ring in &self.component_rings {
+            for i in 0..resolution {
+                let angle = (i as f32 / resolution as f32) * 2.0 * std::f32::consts::PI;
+                
+                let local_x = angle.cos() * ring.radius + ring.offset.x;
+                let local_z = angle.sin() * ring.radius + ring.offset.y;
+                let local_point = Vec3::new(local_x, 0.0, local_z);
+                
+                envelope_points.push(local_point);
+            }
+        }
+        
+        // Find convex hull of all points (simplified: just use all points for now)
+        // TODO: Implement proper convex hull algorithm
+        let mut points = Vec::new();
+        let mut normals = Vec::new();
+        let mut tangents = Vec::new();
+        
+        // For now, just use the first ring's geometry but scaled to encompass others
+        // This is a placeholder - we'll improve this later
+        let primary_ring = &self.component_rings[0];
+        let max_radius = self.component_rings.iter()
+            .map(|r| (r.offset.length() + r.radius))
+            .fold(0.0f32, f32::max);
+            
+        for i in 0..resolution {
+            let angle = (i as f32 / resolution as f32) * 2.0 * std::f32::consts::PI;
+            
+            let local_x = angle.cos() * max_radius;
+            let local_z = angle.sin() * max_radius;
+            let local_point = Vec3::new(local_x, 0.0, local_z);
+            
+            let world_point = self.center + self.orientation * local_point;
+            let world_normal = self.orientation * local_point.normalize();
+            let world_tangent = self.orientation * Vec3::new(-local_z, 0.0, local_x).normalize();
+            
+            points.push(world_point);
+            normals.push(world_normal);
+            tangents.push(world_tangent);
+        }
+        
+        CrossSectionGeometry {
+            points,
+            normals,
+            tangents,
+            section_normal: self.orientation * Vec3::Y,
         }
     }
 }
+

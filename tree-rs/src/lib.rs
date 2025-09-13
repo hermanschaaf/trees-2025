@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
+use glam::Vec2;
 
 mod wasm_math;
 mod tree_structure;
@@ -107,25 +108,36 @@ impl TreeObject {
         let max_depth = self.max_depth;
         let radius_taper = self.radius_taper;
         
-        // Clear existing rings
-        self.tree.rings.clear();
+        // Clear existing cross-sections
+        self.tree.cross_sections.clear();
         
         let mut rng = SmallRng::seed_from_u64(self.seed as u64);
         
-        // Create root ring
-        let root_ring = tree_structure::TreeRing {
+        // Create root cross-section with main trunk ring
+        let root_cross_section = tree_structure::BranchCrossSection {
             center: Vec3::ZERO,
-            radius: self.butressing,
             orientation: Quat::IDENTITY,
+            component_rings: vec![tree_structure::ComponentRing {
+                offset: Vec2::ZERO,
+                radius: self.butressing,
+                ring_type: tree_structure::RingType::MainTrunk,
+                parent_ring_id: None,
+                children_ring_ids: Vec::new(),
+            }],
             parent_index: None,
             children_indices: Vec::new(),
         };
-        self.tree.rings.push(root_ring);
+        self.tree.cross_sections.push(root_cross_section);
         
         // Start recursive generation from root
+        let root_ring_id = tree_structure::RingId {
+            cross_section_index: 0,
+            ring_index: 0,
+        };
+        
         Self::generate_branch_recursive_static(
-            &mut self.tree.rings,
-            0,                    // parent_ring_index
+            &mut self.tree.cross_sections,
+            root_ring_id,         // parent_ring_id
             Vec3::new(0.0, 1.0, 0.0), // growth_direction (up)
             self.butressing,      // current_radius
             0,                    // depth
@@ -141,8 +153,8 @@ impl TreeObject {
     }
     
     fn generate_branch_recursive_static(
-        rings: &mut Vec<tree_structure::TreeRing>,
-        parent_index: usize,
+        cross_sections: &mut Vec<tree_structure::BranchCrossSection>,
+        parent_ring_id: tree_structure::RingId,
         growth_direction: glam::Vec3,
         current_radius: f32,
         depth: u32,
@@ -163,8 +175,8 @@ impl TreeObject {
             return;
         }
         
-        // Calculate next ring position
-        let parent_center = rings[parent_index].center;
+        // Calculate next cross-section position
+        let parent_center = cross_sections[parent_ring_id.cross_section_index].center;
         
         // Add some bend to the growth direction for natural curves
         let bend_min = bend_angle_range.0.min(bend_angle_range.1);
@@ -175,20 +187,31 @@ impl TreeObject {
         let bent_direction = (bend_rotation * growth_direction).normalize();
         
         let next_center = parent_center + bent_direction * segment_length;
-        let next_radius = current_radius * 0.95; // Slight taper per segment
+        let next_radius = current_radius * 0.98; // Much gentler taper per segment
         
-        // Create the next ring
-        let ring = tree_structure::TreeRing {
+        // Create the next cross-section with a single component ring
+        let new_cross_section = tree_structure::BranchCrossSection {
             center: next_center,
-            radius: next_radius,
             orientation: Quat::from_rotation_arc(Vec3::Y, bent_direction),
-            parent_index: Some(parent_index),
+            component_rings: vec![tree_structure::ComponentRing {
+                offset: Vec2::ZERO,
+                radius: next_radius,
+                ring_type: tree_structure::RingType::MainTrunk,
+                parent_ring_id: Some(parent_ring_id),
+                children_ring_ids: Vec::new(),
+            }],
+            parent_index: Some(parent_ring_id.cross_section_index),
             children_indices: Vec::new(),
         };
         
-        let ring_index = rings.len();
-        rings[parent_index].children_indices.push(ring_index);
-        rings.push(ring);
+        let cross_section_index = cross_sections.len();
+        cross_sections[parent_ring_id.cross_section_index].children_indices.push(cross_section_index);
+        cross_sections.push(new_cross_section);
+        
+        let new_ring_id = tree_structure::RingId {
+            cross_section_index,
+            ring_index: 0,
+        };
         
         // Determine if branching should occur - ensure valid range
         let freq_min = branch_frequency_range.0.max(1);
@@ -220,8 +243,8 @@ impl TreeObject {
             
             // Recursively generate both branches
             Self::generate_branch_recursive_static(
-                rings,
-                ring_index,
+                cross_sections,
+                new_ring_id,
                 left_direction,
                 branch_radius,
                 depth + 1,
@@ -236,8 +259,8 @@ impl TreeObject {
             );
             
             Self::generate_branch_recursive_static(
-                rings,
-                ring_index,
+                cross_sections,
+                new_ring_id,
                 right_direction,
                 branch_radius,
                 depth + 1,
@@ -253,8 +276,8 @@ impl TreeObject {
         } else {
             // Continue growing this branch
             Self::generate_branch_recursive_static(
-                rings,
-                ring_index,
+                cross_sections,
+                new_ring_id,
                 bent_direction,
                 next_radius,
                 depth,
@@ -327,17 +350,19 @@ impl TreeObject {
     }
 
     pub fn rings_count(&self) -> usize {
-        self.tree.rings.len()
+        self.tree.cross_sections.len()
     }
     
     pub fn ring_center(&self, index: usize) -> Option<wasm_math::Vector3d> {
-        self.tree.rings.get(index).map(|ring| {
-            wasm_math::Vector3d::new(ring.center.x, ring.center.y, ring.center.z)
+        self.tree.cross_sections.get(index).map(|cross_section| {
+            wasm_math::Vector3d::new(cross_section.center.x, cross_section.center.y, cross_section.center.z)
         })
     }
     
     pub fn ring_radius(&self, index: usize) -> Option<f32> {
-        self.tree.rings.get(index).map(|ring| ring.radius)
+        self.tree.cross_sections.get(index).and_then(|cross_section| {
+            cross_section.component_rings.first().map(|ring| ring.radius)
+        })
     }
     
     pub fn generate_tree_mesh(&self, resolution: u32) -> TreeMesh {
