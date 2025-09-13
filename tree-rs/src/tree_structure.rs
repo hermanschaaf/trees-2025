@@ -3,6 +3,7 @@ use glam::{Vec2, Vec3, Quat};
 #[derive(Debug)]
 pub struct TreeStructure {
     pub cross_sections: Vec<BranchCrossSection>,
+    pub twigs: Vec<Twig>,       // Collection of all twigs in the tree
 
     // Metadata
     pub species_params: TreeSpecies,
@@ -88,10 +89,35 @@ pub struct RingGeometry {
     pub ring_normal: Vec3,      // Overall ring direction
 }
 
+#[derive(Debug, Clone)]
+pub struct Twig {
+    pub position: Vec3,         // World position of twig attachment
+    pub orientation: Quat,      // Twig orientation in world space
+    pub scale: f32,             // Size scaling factor (0.5-3.0)
+    pub twig_type: TwigType,    // Type of twig for rendering
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TwigType {
+    LeafCluster,                // Dense cluster of leaves
+    SmallBranch,                // Small woody branch with sparse leaves
+    BranchTip,                  // Terminal branch tip with buds
+}
+
+#[derive(Debug, Clone)]
+pub struct TwigGenerationParams {
+    pub density: f32,           // Twigs per branch tip (0.1-2.0)
+    pub scale_min: f32,         // Minimum twig scale
+    pub scale_max: f32,         // Maximum twig scale
+    pub angle_variation: f32,   // Angular spread variation (0.0-1.0)
+    pub attachment_threshold: f32, // Branch radius threshold for twig attachment
+}
+
 impl TreeStructure {
     pub fn new(tree_species: TreeSpecies) -> TreeStructure {
         TreeStructure{
             cross_sections: Vec::new(),
+            twigs: Vec::new(),
             species_params: tree_species.clone(),
             age: 0.0,
             overall_health: 0.0,

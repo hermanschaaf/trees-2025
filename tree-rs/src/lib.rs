@@ -28,6 +28,12 @@ pub struct TreeObject {
     pub root_spread: f32, // How wide roots spread (0.5-2.0)
     pub root_density: u32, // Number of main roots (2-8)
     pub root_segment_length: f32, // Length of root segments
+    
+    // Twig system parameters
+    pub twig_enable: bool, // Whether to generate twigs
+    pub twig_density: f32, // Twigs per branch tip (0.1-2.0)
+    pub twig_scale: f32, // Size scaling for twigs (0.5-3.0)
+    pub twig_angle_variation: f32, // Angular spread of twigs (0.0-1.0)
     tree: tree_structure::TreeStructure,
 }
 
@@ -99,6 +105,12 @@ impl TreeObject {
             root_spread: 1.2,
             root_density: 4,
             root_segment_length: 0.3,
+            
+            // Twig system defaults
+            twig_enable: true,
+            twig_density: 1.0,
+            twig_scale: 1.0,
+            twig_angle_variation: 0.5,
             tree: tree_structure::TreeStructure::new(tree_structure::TreeSpecies {
                 branching_angle_range: (0.3, 0.8),
                 ring_spacing: trunk_height / 3.0, // Only 3-4 rings for trunk (root, mid, split, top)
@@ -181,6 +193,49 @@ impl TreeObject {
                 radius_taper,
                 self.segment_length_variation,
             );
+        }
+        
+        // Generate twigs if enabled
+        if self.twig_enable {
+            // Clear existing twigs
+            self.tree.twigs.clear();
+            
+            // Create twig generation parameters
+            let twig_params = tree_structure::TwigGenerationParams {
+                density: self.twig_density,
+                scale_min: self.twig_scale * 0.5,
+                scale_max: self.twig_scale * 1.5,
+                angle_variation: self.twig_angle_variation,
+                attachment_threshold: 0.05, // Attach twigs to branches with radius < 0.05
+            };
+            
+            // Find termination points in all cross-sections
+            for (i, cross_section) in self.tree.cross_sections.iter().enumerate() {
+                for ring in &cross_section.component_rings {
+                    // Check if this is a termination point (small radius or no children)
+                    let is_termination = ring.radius <= twig_params.attachment_threshold 
+                        || cross_section.children_indices.is_empty();
+                    
+                    if is_termination {
+                        // Get branch direction (approximate from parent if available)
+                        let branch_direction = if i > 0 {
+                            (cross_section.center - self.tree.cross_sections[0].center).normalize()
+                        } else {
+                            Vec3::Y // Default upward direction for trunk
+                        };
+                        
+                        // Generate twigs at this termination point
+                        Self::generate_twigs_at_position(
+                            &mut self.tree.twigs,
+                            cross_section.center,
+                            branch_direction,
+                            ring.radius,
+                            &twig_params,
+                            &mut rng,
+                        );
+                    }
+                }
+            }
         }
     }
     
@@ -376,6 +431,7 @@ impl TreeObject {
         
         // Stop recursion if too deep
         if depth >= max_depth {
+            // This is a termination point - generate twigs if enabled
             return;
         }
         
@@ -809,6 +865,69 @@ impl TreeObject {
         (cross_section_index, 0) // Ring is at index 0 in the new cross-section
     }
     
+    fn generate_twigs_at_position(
+        twigs: &mut Vec<tree_structure::Twig>,
+        position: glam::Vec3,
+        branch_direction: glam::Vec3,
+        branch_radius: f32,
+        twig_params: &tree_structure::TwigGenerationParams,
+        rng: &mut rand::rngs::SmallRng,
+    ) {
+        use rand::Rng;
+        use glam::{Vec3, Quat};
+        use std::f32::consts::PI;
+        
+        // Determine number of twigs based on density and branch size
+        let base_twig_count = (twig_params.density * (branch_radius / twig_params.attachment_threshold)).max(0.1);
+        let twig_count = rng.gen_range((base_twig_count * 0.5)..=(base_twig_count * 1.5)) as u32;
+        let twig_count = twig_count.max(1).min(8); // Clamp between 1 and 8 twigs
+        
+        for i in 0..twig_count {
+            // Random angle around the branch
+            let angle = if twig_count == 1 {
+                rng.gen_range(0.0..2.0 * PI)
+            } else {
+                (i as f32 / twig_count as f32) * 2.0 * PI + rng.gen_range(-0.5..0.5)
+            };
+            
+            // Create perpendicular vectors to branch direction
+            let up = if branch_direction.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+            let right = branch_direction.cross(up).normalize();
+            let forward = right.cross(branch_direction).normalize();
+            
+            // Random twig direction with variation
+            let variation = twig_params.angle_variation * rng.gen_range(-1.0..1.0);
+            let twig_angle = 45.0f32.to_radians() + variation * 30.0f32.to_radians();
+            
+            let twig_direction = (
+                branch_direction * twig_angle.cos() +
+                (right * angle.cos() + forward * angle.sin()) * twig_angle.sin()
+            ).normalize();
+            
+            // Random twig scale
+            let scale = rng.gen_range(twig_params.scale_min..=twig_params.scale_max);
+            
+            // Choose twig type based on branch radius
+            let twig_type = if branch_radius < 0.02 {
+                tree_structure::TwigType::LeafCluster
+            } else if branch_radius < 0.04 {
+                tree_structure::TwigType::BranchTip
+            } else {
+                tree_structure::TwigType::SmallBranch
+            };
+            
+            // Create twig
+            let twig = tree_structure::Twig {
+                position: position + twig_direction * (branch_radius * 0.5), // Slight offset from branch center
+                orientation: Quat::from_rotation_arc(Vec3::Y, twig_direction),
+                scale,
+                twig_type,
+            };
+            
+            twigs.push(twig);
+        }
+    }
+    
     fn generate_root_system(
         cross_sections: &mut Vec<tree_structure::BranchCrossSection>,
         root_cross_section_index: usize,
@@ -1032,6 +1151,46 @@ impl TreeObject {
         })
     }
     
+    pub fn twigs_count(&self) -> usize {
+        self.tree.twigs.len()
+    }
+    
+    pub fn twig_position(&self, index: usize) -> Option<wasm_math::Vector3d> {
+        self.tree.twigs.get(index).map(|twig| {
+            wasm_math::Vector3d::new(twig.position.x, twig.position.y, twig.position.z)
+        })
+    }
+    
+    pub fn twig_orientation_x(&self, index: usize) -> Option<f32> {
+        self.tree.twigs.get(index).map(|twig| twig.orientation.x)
+    }
+    
+    pub fn twig_orientation_y(&self, index: usize) -> Option<f32> {
+        self.tree.twigs.get(index).map(|twig| twig.orientation.y)
+    }
+    
+    pub fn twig_orientation_z(&self, index: usize) -> Option<f32> {
+        self.tree.twigs.get(index).map(|twig| twig.orientation.z)
+    }
+    
+    pub fn twig_orientation_w(&self, index: usize) -> Option<f32> {
+        self.tree.twigs.get(index).map(|twig| twig.orientation.w)
+    }
+    
+    pub fn twig_scale(&self, index: usize) -> Option<f32> {
+        self.tree.twigs.get(index).map(|twig| twig.scale)
+    }
+    
+    pub fn twig_type(&self, index: usize) -> Option<String> {
+        self.tree.twigs.get(index).map(|twig| {
+            match twig.twig_type {
+                tree_structure::TwigType::LeafCluster => "LeafCluster".to_string(),
+                tree_structure::TwigType::SmallBranch => "SmallBranch".to_string(),
+                tree_structure::TwigType::BranchTip => "BranchTip".to_string(),
+            }
+        })
+    }
+
     pub fn generate_tree_mesh(&self, resolution: u32) -> TreeMesh {
         let ring_mesh = self.tree.generate_mesh(resolution);
         
@@ -1151,6 +1310,27 @@ impl TreeObject {
 
     pub fn set_root_segment_length(&mut self, segment_length: f32) {
         self.root_segment_length = segment_length.max(0.1).min(0.8); // Clamp between 0.1 and 0.8
+        self.regenerate_tree();
+    }
+
+    // Twig system setters
+    pub fn set_twig_enable(&mut self, enable: bool) {
+        self.twig_enable = enable;
+        self.regenerate_tree();
+    }
+
+    pub fn set_twig_density(&mut self, density: f32) {
+        self.twig_density = density.max(0.1).min(2.0); // Clamp between 0.1 and 2.0
+        self.regenerate_tree();
+    }
+
+    pub fn set_twig_scale(&mut self, scale: f32) {
+        self.twig_scale = scale.max(0.5).min(3.0); // Clamp between 0.5 and 3.0
+        self.regenerate_tree();
+    }
+
+    pub fn set_twig_angle_variation(&mut self, variation: f32) {
+        self.twig_angle_variation = variation.max(0.0).min(1.0); // Clamp between 0.0 and 1.0
         self.regenerate_tree();
     }
 }

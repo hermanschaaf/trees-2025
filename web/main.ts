@@ -44,10 +44,16 @@ const treeParams = {
     rootDepth: tree.root_depth,
     rootSpread: tree.root_spread,
     rootDensity: tree.root_density,
-    rootSegmentLength: tree.root_segment_length
+    rootSegmentLength: tree.root_segment_length,
+    // Twig system parameters
+    twigEnable: tree.twig_enable,
+    twigDensity: tree.twig_density,
+    twigScale: tree.twig_scale,
+    twigAngleVariation: tree.twig_angle_variation
 };
 
 let ringMeshes: THREE.Mesh[] = [];
+let twigMeshes: THREE.Mesh[] = [];
 
 // Create materials for rings
 const ringMaterial = new THREE.MeshPhongMaterial({ 
@@ -61,6 +67,83 @@ const cylinderMaterial = new THREE.MeshPhongMaterial({
     specular: 0x111111
 });
 
+// Create materials for twigs
+const leafMaterial = new THREE.MeshLambertMaterial({ 
+    color: 0x228B22, // Forest green
+    side: THREE.DoubleSide // Show both sides of leaves
+});
+const twigBranchMaterial = new THREE.MeshPhongMaterial({ 
+    color: 0x8B4513, // Brown like main branches
+    shininess: 10
+});
+const budMaterial = new THREE.MeshPhongMaterial({ 
+    color: 0x90EE90, // Light green for buds
+    shininess: 15
+});
+
+// Create twig geometries for different twig types
+const createTwigGeometry = (twigType: string, scale: number) => {
+    switch (twigType) {
+        case 'LeafCluster':
+            // Create a cluster of small leaf planes
+            const leafClusterGeometry = new THREE.Group();
+            for (let i = 0; i < 5; i++) {
+                const leafGeometry = new THREE.PlaneGeometry(0.1 * scale, 0.15 * scale);
+                const leafMesh = new THREE.Mesh(leafGeometry, leafMaterial);
+                
+                // Random positioning within cluster
+                const angle = (i / 5) * Math.PI * 2;
+                leafMesh.position.set(
+                    Math.cos(angle) * 0.05 * scale,
+                    Math.random() * 0.1 * scale,
+                    Math.sin(angle) * 0.05 * scale
+                );
+                leafMesh.rotation.set(
+                    Math.random() * 0.5,
+                    angle + Math.random() * 0.5,
+                    Math.random() * 0.5
+                );
+                leafClusterGeometry.add(leafMesh);
+            }
+            return leafClusterGeometry;
+            
+        case 'SmallBranch':
+            // Create a small branch with a few leaves
+            const branchGroup = new THREE.Group();
+            
+            // Small branch cylinder
+            const branchGeometry = new THREE.CylinderGeometry(0.01 * scale, 0.02 * scale, 0.2 * scale, 6);
+            const branchMesh = new THREE.Mesh(branchGeometry, twigBranchMaterial);
+            branchMesh.position.y = 0.1 * scale;
+            branchGroup.add(branchMesh);
+            
+            // Add 2-3 leaves
+            for (let i = 0; i < 3; i++) {
+                const leafGeometry = new THREE.PlaneGeometry(0.08 * scale, 0.12 * scale);
+                const leafMesh = new THREE.Mesh(leafGeometry, leafMaterial);
+                leafMesh.position.set(
+                    (Math.random() - 0.5) * 0.1 * scale,
+                    0.15 * scale + Math.random() * 0.05 * scale,
+                    (Math.random() - 0.5) * 0.1 * scale
+                );
+                leafMesh.rotation.set(
+                    Math.random() * 0.3,
+                    Math.random() * Math.PI,
+                    Math.random() * 0.3
+                );
+                branchGroup.add(leafMesh);
+            }
+            return branchGroup;
+            
+        case 'BranchTip':
+        default:
+            // Create a simple bud at branch tip
+            const budGeometry = new THREE.SphereGeometry(0.03 * scale, 6, 4);
+            const budMesh = new THREE.Mesh(budGeometry, budMaterial);
+            return budMesh;
+    }
+};
+
 // Create tree visualization using generated mesh
 const createTreeVisualization = () => {
     // Clear existing meshes
@@ -69,6 +152,22 @@ const createTreeVisualization = () => {
         mesh.geometry.dispose();
     });
     ringMeshes = [];
+    
+    // Clear existing twigs
+    twigMeshes.forEach(mesh => {
+        scene.remove(mesh);
+        // Dispose geometries for Groups and individual meshes
+        if (mesh instanceof THREE.Group) {
+            mesh.children.forEach(child => {
+                if (child instanceof THREE.Mesh) {
+                    child.geometry.dispose();
+                }
+            });
+        } else {
+            mesh.geometry.dispose();
+        }
+    });
+    twigMeshes = [];
     
     // Generate mesh from Rust
     const treeMesh = tree.generate_tree_mesh(16); // 16 points per ring
@@ -123,6 +222,50 @@ const createTreeVisualization = () => {
             }
         }
         console.log(`Created ${ringMeshes.length} fallback ring meshes`);
+    }
+    
+    // Generate twigs if enabled
+    if (treeParams.twigEnable) {
+        const twigCount = tree.twigs_count();
+        console.log(`Generating ${twigCount} twigs`);
+        
+        for (let i = 0; i < twigCount; i++) {
+            const position = tree.twig_position(i);
+            const scale = tree.twig_scale(i);
+            const twigType = tree.twig_type(i);
+            const orientationX = tree.twig_orientation_x(i);
+            const orientationY = tree.twig_orientation_y(i);
+            const orientationZ = tree.twig_orientation_z(i);
+            const orientationW = tree.twig_orientation_w(i);
+            
+            if (position && scale !== null && twigType && 
+                orientationX !== null && orientationY !== null && 
+                orientationZ !== null && orientationW !== null) {
+                
+                // Create twig geometry
+                const twigGeometry = createTwigGeometry(twigType, scale);
+                
+                // Position the twig
+                twigGeometry.position.set(position.x, position.y, position.z);
+                
+                // Apply quaternion rotation
+                const quaternion = new THREE.Quaternion(orientationX, orientationY, orientationZ, orientationW);
+                twigGeometry.setRotationFromQuaternion(quaternion);
+                
+                // Enable shadows
+                twigGeometry.traverse((child) => {
+                    if (child instanceof THREE.Mesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                
+                scene.add(twigGeometry);
+                twigMeshes.push(twigGeometry as any); // Store for cleanup
+            }
+        }
+        
+        console.log(`Created ${twigMeshes.length} twig instances`);
     }
 };
 
@@ -335,6 +478,35 @@ rootFolder.add(treeParams, 'rootSegmentLength', 0.1, 0.8).name('Root Segment Len
 });
 
 rootFolder.open();
+
+// Add twig system controls
+const twigFolder = gui.addFolder('Twig System');
+
+twigFolder.add(treeParams, 'twigEnable').name('Enable Twigs').onChange((value: boolean) => {
+    tree.set_twig_enable(value);
+    treeParams.twigEnable = value;
+    redrawTree();
+});
+
+twigFolder.add(treeParams, 'twigDensity', 0.1, 2.0).name('Twig Density').onChange((value: number) => {
+    tree.set_twig_density(value);
+    treeParams.twigDensity = value;
+    redrawTree();
+});
+
+twigFolder.add(treeParams, 'twigScale', 0.5, 3.0).name('Twig Size').onChange((value: number) => {
+    tree.set_twig_scale(value);
+    treeParams.twigScale = value;
+    redrawTree();
+});
+
+twigFolder.add(treeParams, 'twigAngleVariation', 0.0, 1.0).name('Angle Variation').onChange((value: number) => {
+    tree.set_twig_angle_variation(value);
+    treeParams.twigAngleVariation = value;
+    redrawTree();
+});
+
+twigFolder.open();
 
 // Animation loop
 function animate() {
