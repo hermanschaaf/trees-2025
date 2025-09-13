@@ -42,14 +42,14 @@ pub struct RingId {
     pub ring_index: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RingType {
     MainTrunk,
     SideBranch,
     Root { root_type: RootType },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RootType {
     TapRoot,        // Deep central root
     LateralRoot,    // Horizontal spreading roots
@@ -438,44 +438,47 @@ impl BranchCrossSection {
     }
 
     fn generate_multi_ring_geometry(&self, resolution: u32) -> CrossSectionGeometry {
-        // For overlapping circles, we need to find the unified perimeter
-        // Simple approach: sample around each circle and find the outer envelope
-        
-        let mut envelope_points = Vec::new();
-        
-        // Sample points around each ring
-        for ring in &self.component_rings {
-            for i in 0..resolution {
-                let angle = (i as f32 / resolution as f32) * 2.0 * std::f32::consts::PI;
-                
-                let local_x = angle.cos() * ring.radius + ring.offset.x;
-                let local_z = angle.sin() * ring.radius + ring.offset.y;
-                let local_point = Vec3::new(local_x, 0.0, local_z);
-                
-                envelope_points.push(local_point);
-            }
-        }
-        
-        // Find convex hull of all points (simplified: just use all points for now)
-        // TODO: Implement proper convex hull algorithm
+        // Create a unified perimeter from multiple overlapping circles
         let mut points = Vec::new();
         let mut normals = Vec::new();
         let mut tangents = Vec::new();
         
-        // For now, just use the first ring's geometry but scaled to encompass others
-        // This is a placeholder - we'll improve this later
-        let primary_ring = &self.component_rings[0];
-        let max_radius = self.component_rings.iter()
-            .map(|r| (r.offset.length() + r.radius))
-            .fold(0.0f32, f32::max);
-            
+        // Sample points at regular angular intervals
         for i in 0..resolution {
             let angle = (i as f32 / resolution as f32) * 2.0 * std::f32::consts::PI;
+            let direction = Vec2::new(angle.cos(), angle.sin());
             
-            let local_x = angle.cos() * max_radius;
-            let local_z = angle.sin() * max_radius;
+            // Find the maximum distance in this direction across all rings
+            let mut max_distance = 0.0f32;
+            
+            for ring in &self.component_rings {
+                // Project the ring center onto the direction vector
+                let center_projection = ring.offset.dot(direction);
+                
+                // Calculate the maximum reach of this ring in this direction
+                let ring_reach = center_projection + ring.radius;
+                
+                // Also check if the direction intersects the ring from the other side
+                let distance_to_center = (ring.offset - direction * center_projection).length();
+                if distance_to_center <= ring.radius {
+                    // The ray intersects this ring
+                    let intersection_distance = center_projection + (ring.radius * ring.radius - distance_to_center * distance_to_center).sqrt();
+                    max_distance = max_distance.max(intersection_distance);
+                } else {
+                    // The ray doesn't intersect, use the closest point on the ring
+                    max_distance = max_distance.max(ring_reach);
+                }
+            }
+            
+            // Ensure we have at least some minimum radius
+            max_distance = max_distance.max(0.1);
+            
+            // Create the point at this distance in the direction
+            let local_x = direction.x * max_distance;
+            let local_z = direction.y * max_distance;
             let local_point = Vec3::new(local_x, 0.0, local_z);
             
+            // Transform to world space
             let world_point = self.center + self.orientation * local_point;
             let world_normal = self.orientation * local_point.normalize();
             let world_tangent = self.orientation * Vec3::new(-local_z, 0.0, local_x).normalize();

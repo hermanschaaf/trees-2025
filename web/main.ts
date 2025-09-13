@@ -35,6 +35,7 @@ const treeParams = {
     branchFrequencyMax: tree.branch_frequency_max,
     maxDepth: tree.max_depth,
     radiusTaper: tree.radius_taper,
+    trunkRingSpread: tree.trunk_ring_spread,
     radius: 0.5,
     radialSegments: 32
 };
@@ -63,7 +64,7 @@ const createTreeVisualization = () => {
     ringMeshes = [];
     
     // Generate mesh from Rust
-    const treeMesh = tree.generate_tree_mesh(6); // 16 points per ring
+    const treeMesh = tree.generate_tree_mesh(16); // 16 points per ring
     
     if (treeMesh.vertices.length > 0) {
         // Create Three.js geometry from the generated mesh
@@ -164,7 +165,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
 // GUI Controls
-const gui = new dat.GUI();
+const gui = new dat.GUI({ width: 320 });
 const treeFolder = gui.addFolder('Tree Parameters');
 
 const redrawTree = () => {
@@ -175,8 +176,6 @@ treeFolder.add(treeParams, 'height', 0.1, 10).onChange((value: number) => {
     tree.set_trunk_height(value);
     treeParams.height = value;
     redrawTree();
-    // Update controls target to center of tree
-    controls.target.set(0, value / 2, 0);
 });
 
 treeFolder.add(treeParams, 'butressing', 0.1, 5).onChange((value: number) => {
@@ -245,6 +244,12 @@ advancedFolder.add(treeParams, 'maxDepth', 1, 12).name('Max Depth').onChange((va
 advancedFolder.add(treeParams, 'radiusTaper', 0.1, 1.0).name('Radius Taper').onChange((value: number) => {
     tree.set_radius_taper(value);
     treeParams.radiusTaper = value;
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'trunkRingSpread', 0.0, 5.0).name('Ring Spread').onChange((value: number) => {
+    tree.set_trunk_ring_spread(value);
+    treeParams.trunkRingSpread = value;
     redrawTree();
 });
 
