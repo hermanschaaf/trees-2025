@@ -1335,7 +1335,7 @@ impl TreeObject {
     }
 
     pub fn set_twig_scale(&mut self, scale: f32) {
-        self.twig_scale = scale.max(0.5).min(3.0); // Clamp between 0.5 and 3.0
+        self.twig_scale = scale.max(0.1).min(3.0); // Clamp between 0.5 and 3.0
         self.regenerate_tree();
     }
 

@@ -458,7 +458,7 @@ const createTwigInstancedMesh = async (twigCount: number): Promise<void> => {
                 clonedMaterial.transparent = true;
                 clonedMaterial.alphaTest = 0.01; // Prevent z-fighting issues
             }
-            
+
             meshData.push({
                 geometry: child.geometry.clone(),
                 material: clonedMaterial
@@ -473,12 +473,32 @@ const createTwigInstancedMesh = async (twigCount: number): Promise<void> => {
     
     console.log(`Found ${meshData.length} meshes in GLTF twig model`);
     
+    // Respect the GLTF's original pivot point and transformations
+    // Extract any transformation data from the GLTF nodes
+    let modelTransform = new THREE.Matrix4();
+    
+    model.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+            // Get the mesh's world matrix which includes all parent transformations
+            child.updateMatrixWorld(true);
+            console.log('GLTF mesh transform:', child.matrixWorld.elements);
+            
+            // For now, let's try using the model as-is without offset calculations
+            console.log('Mesh position:', child.position);
+            console.log('Mesh scale:', child.scale);
+            console.log('Mesh rotation:', child.rotation);
+        }
+    });
+    
     // Create instanced meshes for each mesh in the GLTF model
     for (const meshInfo of meshData) {
         const instancedMesh = new THREE.InstancedMesh(meshInfo.geometry, meshInfo.material, actualInstanceCount);
         instancedMesh.castShadow = true;
         instancedMesh.receiveShadow = true;
         
+        // Don't apply any custom offset - let the GLTF's original pivot be used
+        instancedMesh.userData = { useOriginalPivot: true };
+
         scene.add(instancedMesh);
         twigInstancedMeshes.push(instancedMesh);
     }
@@ -554,26 +574,7 @@ const createTreeVisualization = async () => {
         
         console.log(`Created tree mesh with ${treeMesh.vertices.length/3} vertices and ${treeMesh.indices.length/3} triangles`);
     } else {
-        console.log("No mesh data generated - falling back to simple visualization");
-
-        // Fallback: Create simple ring visualization
-        const ringCount = tree.rings_count();
-        for (let i = 0; i < ringCount; i++) {
-            const center = tree.ring_center(i);
-            const radius = tree.ring_radius(i);
-
-            if (center && radius !== null) {
-                const geometry = new THREE.TorusGeometry(radius, 0.05, 8, 16);
-                const mesh = new THREE.Mesh(geometry, ringMaterial);
-                mesh.position.set(center.x, center.y, center.z);
-                mesh.rotation.x = Math.PI / 2;
-                mesh.castShadow = true;
-                mesh.receiveShadow = true;
-                ringMeshes.push(mesh);
-                scene.add(mesh);
-            }
-        }
-        console.log(`Created ${ringMeshes.length} fallback ring meshes`);
+        console.warn('No vertices found in tree mesh');
     }
     
     // Generate twigs if enabled
@@ -606,16 +607,20 @@ const createTreeVisualization = async () => {
                         const selectedTwig = twigLibrary?.twigs.find(t => t.id === selectedTwigType);
                         const finalScale = scale * (selectedTwig?.defaultScale || 1.0);
                         
-                        // Create transform matrix
+                        // Create transform matrix with offset correction
                         const quaternion = new THREE.Quaternion(orientationX, orientationY, orientationZ, orientationW);
-                        matrix.compose(
-                            new THREE.Vector3(position.x, position.y, position.z),
-                            quaternion,
-                            new THREE.Vector3(finalScale, finalScale, finalScale)
-                        );
-                        
-                        // Set the same transform for all instanced meshes
+                        const fix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/2);
+                        quaternion.premultiply(fix);
+                        // Apply each instanced mesh - try with no offset first
                         twigInstancedMeshes.forEach(mesh => {
+                            let finalPosition = new THREE.Vector3(position.x, position.y, position.z);
+
+                            matrix.compose(
+                                finalPosition,
+                                quaternion,
+                                new THREE.Vector3(finalScale, finalScale, finalScale)
+                            );
+                            
                             mesh.setMatrixAt(i, matrix);
                         });
                     }
@@ -720,12 +725,12 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 // Position the camera
-camera.position.set(6, 4, 8);
-camera.lookAt(0, treeParams.height / 2, 0);
+camera.position.set(9, 10, 9);
+camera.lookAt(0, 0, 0);
 
 // Add orbit controls for mouse/trackpad interaction
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, treeParams.height / 2, 0);
+controls.target.set(0, treeParams.height * 1.8, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
@@ -935,7 +940,7 @@ twigFolder.add(treeParams, 'twigDensity', 0.1, 2.0).name('Twig Density').onChang
     redrawTree();
 });
 
-twigFolder.add(treeParams, 'twigScale', 0.5, 3.0).name('Twig Size').onChange((value: number) => {
+twigFolder.add(treeParams, 'twigScale', 0.1, 3.0).name('Twig Size').onChange((value: number) => {
     tree.set_twig_scale(value);
     treeParams.twigScale = value;
     redrawTree();
@@ -1065,9 +1070,11 @@ function animate() {
     // Update controls for smooth damping
     controls.update();
     
-    // Optional: slowly rotate the cylinder to see it better
-    // cylinder.rotation.y += 0.005;
-    
+    // Vary the twig rotation slightly to simulate wind. Use sinuoidal function to create a more natural effect.
+    twigMeshes.forEach(mesh => {
+        // TODO
+    })
+
     renderer.render(scene, camera);
 }
 

@@ -21,6 +21,12 @@
       "type": "gltf",
       "filename": "twig.004.gltf",
       "defaultScale": 1.0,
+      "attachmentOffset": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+        "description": "Optional custom offset for precise branch attachment. Use negative Y to move the attachment point up from the bottom of the model."
+      },
       "preview": {
         "thumbnail": "TexturesCom_Branches0025_1_M.png",
         "description": "Small cluster of green leaves"
