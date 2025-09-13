@@ -21,6 +21,7 @@ pub struct TreeObject {
     pub max_depth: u32,
     pub radius_taper: f32,
     pub trunk_ring_spread: f32, // 0.0-2.0: how spread out trunk rings are
+    pub segment_length_variation: f32, // 0.0-1.0: how much segment lengths vary
     tree: tree_structure::TreeStructure,
 }
 
@@ -82,9 +83,10 @@ impl TreeObject {
             bend_angle_max: 15.0,
             branch_frequency_min: 2,
             branch_frequency_max: 4,
-            max_depth: 6,
+            max_depth: 12, // Increase to allow longer trunk growth
             radius_taper: 0.8,
             trunk_ring_spread: 0.5,   // Default moderate spread
+            segment_length_variation: 0.3, // Default moderate variation
             tree: tree_structure::TreeStructure::new(tree_structure::TreeSpecies {
                 branching_angle_range: (0.3, 0.8),
                 ring_spacing: trunk_height / 3.0, // Only 3-4 rings for trunk (root, mid, split, top)
@@ -103,9 +105,8 @@ impl TreeObject {
         use glam::{Vec3, Quat};
         
         // Tree generation parameters from instance
-        // Calculate segment length based on trunk height to control number of trunk segments
-        let target_trunk_segments = (self.trunk_height * 3.0).max(3.0) as u32; // ~3 segments per unit height, minimum 3
-        let trunk_segment_length = self.trunk_height / target_trunk_segments as f32;
+        // Use the actual segment_length parameter
+        let trunk_segment_length = self.segment_length;
         
         let branch_angle_range = (self.branch_angle_min, self.branch_angle_max);
         let bend_angle_range = (self.bend_angle_min, self.bend_angle_max);
@@ -137,32 +138,23 @@ impl TreeObject {
         };
         self.tree.cross_sections.push(root_cross_section);
         
-        // Start recursive generation from ALL root rings
-        for ring_index in 0..self.tree.cross_sections[0].component_rings.len() {
-            let root_ring_id = tree_structure::RingId {
-                cross_section_index: 0,
-                ring_index,
-            };
-            
-            let ring_radius = self.tree.cross_sections[0].component_rings[ring_index].radius;
-            
-            Self::generate_branch_recursive_static(
-                &mut self.tree.cross_sections,
-                root_ring_id,         // parent_ring_id for THIS specific ring
-                Vec3::new(0.0, 1.0, 0.0), // growth_direction (up)
-                ring_radius,          // Use THIS ring's radius
-                0,                    // depth
-                0,                    // segments_since_branch
-                &mut rng,
-                trunk_segment_length, // Use calculated trunk segment length
-                branch_angle_range,
-                bend_angle_range,
-                branch_frequency_range,
-                max_depth,
-                radius_taper,
-                self.trunk_height,    // Pass trunk height for branching logic
-            );
-        }
+        // Start coordinated generation from root cross-section
+        Self::generate_coordinated_recursive_static(
+            &mut self.tree.cross_sections,
+            0,                        // Start from root cross-section
+            Vec3::new(0.0, 1.0, 0.0), // growth_direction (up)
+            0,                        // depth
+            0,                        // segments_since_branch
+            &mut rng,
+            trunk_segment_length,     // Use calculated trunk segment length
+            branch_angle_range,
+            bend_angle_range,
+            branch_frequency_range,
+            max_depth,
+            radius_taper,
+            self.trunk_height,        // Pass trunk height for branching logic
+            self.segment_length_variation, // Pass segment variation
+        );
     }
     
     fn generate_trunk_rings(&self) -> Vec<tree_structure::ComponentRing> {
@@ -336,6 +328,284 @@ impl TreeObject {
         (trunk_continuation_rings, side_branch_rings)
     }
     
+    fn generate_coordinated_recursive_static(
+        cross_sections: &mut Vec<tree_structure::BranchCrossSection>,
+        current_cross_section_index: usize,
+        growth_direction: glam::Vec3,
+        depth: u32,
+        segments_since_branch: u32,
+        rng: &mut rand::rngs::SmallRng,
+        segment_length: f32,
+        branch_angle_range: (f32, f32),
+        bend_angle_range: (f32, f32),
+        branch_frequency_range: (u32, u32),
+        max_depth: u32,
+        radius_taper: f32,
+        trunk_height: f32,
+        segment_length_variation: f32,
+    ) {
+        use rand::Rng;
+        use glam::{Vec3, Quat};
+        
+        // Stop recursion if too deep
+        if depth >= max_depth {
+            return;
+        }
+        
+        let current_cross_section = &cross_sections[current_cross_section_index];
+        let current_center = current_cross_section.center;
+        let current_rings = current_cross_section.component_rings.clone();
+        
+        // Stop if no rings left
+        if current_rings.is_empty() {
+            return;
+        }
+        
+        // Stop if trunk is too small - use effective trunk radius (total area)
+        let total_area: f32 = current_rings.iter().map(|r| std::f32::consts::PI * r.radius * r.radius).sum();
+        let effective_trunk_radius = (total_area / std::f32::consts::PI).sqrt();
+        if effective_trunk_radius < 0.005 { // Much lower threshold for trunk termination
+            return;
+        }
+        
+        // Add some bend to the growth direction for natural curves
+        let bend_min = bend_angle_range.0.min(bend_angle_range.1);
+        let bend_max = bend_angle_range.1.max(bend_angle_range.0);
+        let bend_angle = rng.gen_range(bend_min..=bend_max).to_radians();
+        let bend_axis = Vec3::new(rng.gen_range(-1.0..=1.0), 0.0, rng.gen_range(-1.0..=1.0)).normalize();
+        let bend_rotation = Quat::from_axis_angle(bend_axis, bend_angle);
+        let bent_direction = (bend_rotation * growth_direction).normalize();
+        
+        // Apply segment length variation
+        let base_segment_length = segment_length;
+        let variation_factor = 1.0 + (rng.gen_range(-1.0..=1.0) * segment_length_variation);
+        let varied_segment_length = base_segment_length * variation_factor.max(0.1); // Ensure positive
+        
+        let next_center = current_center + bent_direction * varied_segment_length;
+        let next_height = next_center.y;
+        
+        // Make coordinated branching decision for ALL rings in this cross-section
+        let freq_min = branch_frequency_range.0.max(1);
+        let freq_max = branch_frequency_range.1.max(freq_min);
+        let segment_branch_ready = segments_since_branch >= rng.gen_range(freq_min..=freq_max);
+        let height_allows_branching = next_height >= trunk_height;
+        let should_branch = segment_branch_ready && height_allows_branching && depth < max_depth - 1;
+        
+        if should_branch {
+            // ALL rings in this cross-section will branch together
+            Self::create_coordinated_branches(
+                cross_sections,
+                current_cross_section_index,
+                &current_rings,
+                next_center,
+                bent_direction,
+                depth,
+                rng,
+                segment_length,
+                branch_angle_range,
+                bend_angle_range,
+                branch_frequency_range,
+                max_depth,
+                radius_taper,
+                trunk_height,
+                segment_length_variation,
+            );
+        } else {
+            // ALL rings continue as trunk - create next cross-section with all rings
+            // Reduce tapering for buttressed trunks (many rings) to preserve thickness longer
+            let ring_count = current_rings.len() as f32;
+            let buttressing_factor = if ring_count > 2.0 { 0.5 } else { 1.0 }; // Less taper for buttressed trunks
+            let base_taper_factor = if next_height < trunk_height { 0.05 } else { 0.4 };
+            let segment_taper_factor = base_taper_factor * buttressing_factor;
+            let segment_taper = 1.0 - (1.0 - radius_taper) * segment_taper_factor;
+            
+            // Create child rings for ALL parent rings
+            let mut child_rings = Vec::new();
+            for parent_ring in &current_rings {
+                let child_ring = Self::create_child_ring_from_parent(
+                    parent_ring, 
+                    tree_structure::RingId { cross_section_index: current_cross_section_index, ring_index: 0 },
+                    segment_taper
+                );
+                child_rings.push(child_ring);
+            }
+            
+            // Create next cross-section with all child rings
+            let new_cross_section = tree_structure::BranchCrossSection {
+                center: next_center,
+                orientation: Quat::from_rotation_arc(Vec3::Y, bent_direction),
+                component_rings: child_rings,
+                parent_index: Some(current_cross_section_index),
+                children_indices: Vec::new(),
+            };
+            
+            let new_cross_section_index = cross_sections.len();
+            cross_sections[current_cross_section_index].children_indices.push(new_cross_section_index);
+            cross_sections.push(new_cross_section);
+            
+            // Continue recursively with the new cross-section
+            Self::generate_coordinated_recursive_static(
+                cross_sections,
+                new_cross_section_index,
+                bent_direction,
+                depth,
+                segments_since_branch + 1,
+                rng,
+                segment_length,
+                branch_angle_range,
+                bend_angle_range,
+                branch_frequency_range,
+                max_depth,
+                radius_taper,
+                trunk_height,
+                segment_length_variation,
+            );
+        }
+    }
+    
+    fn create_coordinated_branches(
+        cross_sections: &mut Vec<tree_structure::BranchCrossSection>,
+        parent_cross_section_index: usize,
+        parent_rings: &[tree_structure::ComponentRing],
+        center: glam::Vec3,
+        main_direction: glam::Vec3,
+        depth: u32,
+        rng: &mut rand::rngs::SmallRng,
+        segment_length: f32,
+        branch_angle_range: (f32, f32),
+        bend_angle_range: (f32, f32),
+        branch_frequency_range: (u32, u32),
+        max_depth: u32,
+        radius_taper: f32,
+        trunk_height: f32,
+        segment_length_variation: f32,
+    ) {
+        use rand::Rng;
+        use glam::{Vec3, Quat};
+        
+        // Create branch direction
+        let angle_min = branch_angle_range.0.min(branch_angle_range.1);
+        let angle_max = branch_angle_range.1.max(branch_angle_range.0);
+        let branch_angle = rng.gen_range(angle_min..=angle_max).to_radians();
+        
+        let up_component = Vec3::Y;
+        let perpendicular = if main_direction.cross(up_component).length() > 0.1 {
+            main_direction.cross(up_component).normalize()
+        } else {
+            Vec3::X
+        };
+        
+        let branch_rotation = Quat::from_axis_angle(perpendicular, branch_angle);
+        let branch_direction = (branch_rotation * main_direction).normalize();
+        
+        // Create trunk continuation cross-section - SPLIT rings between trunk and branch
+        let segment_taper_factor = 0.5; // More aggressive tapering for branches
+        let segment_taper = 1.0 - (1.0 - radius_taper) * segment_taper_factor;
+        
+        let mut trunk_rings = Vec::new();
+        let mut branch_rings = Vec::new();
+        
+        // Split rings: some continue as trunk, one becomes branch
+        for (i, parent_ring) in parent_rings.iter().enumerate() {
+            if parent_rings.len() == 1 {
+                // Single ring: trunk gets the ring, branch gets a smaller copy
+                let trunk_child = Self::create_child_ring_from_parent(
+                    parent_ring,
+                    tree_structure::RingId { cross_section_index: parent_cross_section_index, ring_index: 0 },
+                    segment_taper * 0.9 // Slightly taper trunk when branching
+                );
+                let branch_child = Self::create_child_ring_from_parent(
+                    parent_ring,
+                    tree_structure::RingId { cross_section_index: parent_cross_section_index, ring_index: 0 },
+                    segment_taper * 0.6 // Much smaller branch
+                );
+                trunk_rings.push(trunk_child);
+                branch_rings.push(branch_child);
+            } else {
+                // Multiple rings: split them between trunk and branch
+                if i == parent_rings.len() - 1 {
+                    // Last ring becomes the branch
+                    let branch_child = Self::create_child_ring_from_parent(
+                        parent_ring,
+                        tree_structure::RingId { cross_section_index: parent_cross_section_index, ring_index: i },
+                        segment_taper
+                    );
+                    branch_rings.push(branch_child);
+                } else {
+                    // Other rings continue as trunk
+                    let trunk_child = Self::create_child_ring_from_parent(
+                        parent_ring,
+                        tree_structure::RingId { cross_section_index: parent_cross_section_index, ring_index: i },
+                        segment_taper * 0.95 // Very light taper for trunk continuation
+                    );
+                    trunk_rings.push(trunk_child);
+                }
+            }
+        }
+        
+        // Create trunk continuation cross-section
+        let trunk_cross_section = tree_structure::BranchCrossSection {
+            center: center + main_direction * segment_length,
+            orientation: Quat::from_rotation_arc(Vec3::Y, main_direction),
+            component_rings: trunk_rings,
+            parent_index: Some(parent_cross_section_index),
+            children_indices: Vec::new(),
+        };
+        
+        // Create branch cross-section
+        let branch_cross_section = tree_structure::BranchCrossSection {
+            center: center + branch_direction * segment_length,
+            orientation: Quat::from_rotation_arc(Vec3::Y, branch_direction),
+            component_rings: branch_rings,
+            parent_index: Some(parent_cross_section_index),
+            children_indices: Vec::new(),
+        };
+        
+        let trunk_cs_idx = cross_sections.len();
+        let branch_cs_idx = trunk_cs_idx + 1;
+        
+        cross_sections[parent_cross_section_index].children_indices.push(trunk_cs_idx);
+        cross_sections[parent_cross_section_index].children_indices.push(branch_cs_idx);
+        
+        cross_sections.push(trunk_cross_section);
+        cross_sections.push(branch_cross_section);
+        
+        // Continue both trunk and branch recursively
+        Self::generate_coordinated_recursive_static(
+            cross_sections,
+            trunk_cs_idx,
+            main_direction,
+            depth + 1,
+            0, // Reset segment counter
+            rng,
+            segment_length,
+            branch_angle_range,
+            bend_angle_range,
+            branch_frequency_range,
+            max_depth,
+            radius_taper,
+            trunk_height,
+            segment_length_variation,
+        );
+        
+        Self::generate_coordinated_recursive_static(
+            cross_sections,
+            branch_cs_idx,
+            branch_direction,
+            depth + 1,
+            0, // Reset segment counter
+            rng,
+            segment_length,
+            branch_angle_range,
+            bend_angle_range,
+            branch_frequency_range,
+            max_depth,
+            radius_taper,
+            trunk_height,
+            segment_length_variation,
+        );
+    }
+    
     fn generate_branch_recursive_static(
         cross_sections: &mut Vec<tree_structure::BranchCrossSection>,
         parent_ring_id: tree_structure::RingId,
@@ -373,9 +643,12 @@ impl TreeObject {
         let bent_direction = (bend_rotation * growth_direction).normalize();
         
         let next_center = parent_center + bent_direction * segment_length;
+        let next_height = next_center.y;
         
         // Apply gentle tapering based on radius_taper parameter
-        let segment_taper = 1.0 - (1.0 - radius_taper) * 0.1;
+        // Less taper for trunk segments, more for branches
+        let trunk_taper_factor = if next_height < trunk_height { 0.02 } else { 0.1 }; // Much less taper in trunk
+        let segment_taper = 1.0 - (1.0 - radius_taper) * trunk_taper_factor;
         
         // Create child ring from THIS specific parent ring
         let child_ring = Self::create_child_ring_from_parent(parent_ring, parent_ring_id, segment_taper);
@@ -395,16 +668,17 @@ impl TreeObject {
             ring_index: child_ring_index,
         };
         
-        // Calculate current height for branching decisions
-        let current_height = next_center.y;
+        // Use the already calculated height for branching decisions
+        let current_height = next_height;
         
         // Determine if branching should occur
         let freq_min = branch_frequency_range.0.max(1);
         let freq_max = branch_frequency_range.1.max(freq_min);
         let segment_branch_ready = segments_since_branch >= rng.gen_range(freq_min..=freq_max);
         
-        // Only start branching after reaching a minimum height (60% of trunk height)
-        let min_branching_height = trunk_height * 0.6;
+        // Only start branching after reaching the desired trunk height
+        // Height parameter controls how much trunk we want before branching starts
+        let min_branching_height = trunk_height;
         let height_allows_branching = current_height >= min_branching_height;
         
         let should_branch = segment_branch_ready && height_allows_branching && depth < max_depth - 1;
@@ -616,6 +890,11 @@ impl TreeObject {
 
     pub fn set_trunk_ring_spread(&mut self, trunk_ring_spread: f32) {
         self.trunk_ring_spread = trunk_ring_spread.max(0.0).min(2.0); // Clamp between 0.0 and 2.0
+        self.regenerate_tree();
+    }
+
+    pub fn set_segment_length_variation(&mut self, segment_length_variation: f32) {
+        self.segment_length_variation = segment_length_variation.max(0.0).min(1.0); // Clamp between 0.0 and 1.0
         self.regenerate_tree();
     }
 }

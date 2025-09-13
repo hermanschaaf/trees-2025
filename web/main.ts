@@ -36,6 +36,7 @@ const treeParams = {
     maxDepth: tree.max_depth,
     radiusTaper: tree.radius_taper,
     trunkRingSpread: tree.trunk_ring_spread,
+    segmentLengthVariation: 0.3, // Default value since it's not exposed yet
     radius: 0.5,
     radialSegments: 32
 };
@@ -250,6 +251,12 @@ advancedFolder.add(treeParams, 'radiusTaper', 0.1, 1.0).name('Radius Taper').onC
 advancedFolder.add(treeParams, 'trunkRingSpread', 0.0, 5.0).name('Ring Spread').onChange((value: number) => {
     tree.set_trunk_ring_spread(value);
     treeParams.trunkRingSpread = value;
+    redrawTree();
+});
+
+advancedFolder.add(treeParams, 'segmentLengthVariation', 0.0, 1.0).name('Segment Variation').onChange((value: number) => {
+    tree.set_segment_length_variation(value);
+    treeParams.segmentLengthVariation = value;
     redrawTree();
 });
 

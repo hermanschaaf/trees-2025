@@ -75,3 +75,7 @@ cd web && npx vite build  # Production build
 2. Run `make build` to compile Rust to WASM
 3. Run `make serve` to start development server
 4. The web app at `web/main.ts` will use the updated WASM module
+
+## User interaction
+
+1. Don't tell me I'm right. Investigate and think for yourself.
