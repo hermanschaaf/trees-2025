@@ -38,7 +38,13 @@ const treeParams = {
     trunkRingSpread: tree.trunk_ring_spread,
     segmentLengthVariation: 0.3, // Default value since it's not exposed yet
     radius: 0.5,
-    radialSegments: 32
+    radialSegments: 32,
+    // Root system parameters
+    rootEnable: tree.root_enable,
+    rootDepth: tree.root_depth,
+    rootSpread: tree.root_spread,
+    rootDensity: tree.root_density,
+    rootSegmentLength: tree.root_segment_length
 };
 
 let ringMeshes: THREE.Mesh[] = [];
@@ -294,6 +300,41 @@ visualFolder.addColor(visualParams, 'color').onChange((value: string) => {
 });
 
 visualFolder.open();
+
+// Add root system controls
+const rootFolder = gui.addFolder('Root System');
+
+rootFolder.add(treeParams, 'rootEnable').name('Enable Roots').onChange((value: boolean) => {
+    tree.set_root_enable(value);
+    treeParams.rootEnable = value;
+    redrawTree();
+});
+
+rootFolder.add(treeParams, 'rootDepth', 0.5, 3.0).name('Root Depth').onChange((value: number) => {
+    tree.set_root_depth(value);
+    treeParams.rootDepth = value;
+    redrawTree();
+});
+
+rootFolder.add(treeParams, 'rootSpread', 0.5, 2.0).name('Root Spread').onChange((value: number) => {
+    tree.set_root_spread(value);
+    treeParams.rootSpread = value;
+    redrawTree();
+});
+
+rootFolder.add(treeParams, 'rootDensity', 2, 8).step(1).name('Root Count').onChange((value: number) => {
+    tree.set_root_density(Math.floor(value));
+    treeParams.rootDensity = Math.floor(value);
+    redrawTree();
+});
+
+rootFolder.add(treeParams, 'rootSegmentLength', 0.1, 0.8).name('Root Segment Length').onChange((value: number) => {
+    tree.set_root_segment_length(value);
+    treeParams.rootSegmentLength = value;
+    redrawTree();
+});
+
+rootFolder.open();
 
 // Animation loop
 function animate() {
