@@ -111,6 +111,11 @@ const treeParams = {
     twigDensity: tree.twig_density,
     twigScale: 1.0, // Default value, will be updated by the tree object
     twigAngleVariation: tree.twig_angle_variation,
+    twigBaseAngle: 45.0, // Base angle for twigs in degrees
+    // Wind animation parameters
+    windEnabled: true,
+    windStrength: 0.2,
+    windSpeed: 1.0,
     // Debug parameters
     debugMode: false,
     colorByDepth: false
@@ -685,7 +690,8 @@ const createTreeVisualization = async () => {
                         // Create transform matrix with offset correction
                         const quaternion = new THREE.Quaternion(orientationX, orientationY, orientationZ, orientationW);
                         const fix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/2);
-                        quaternion.premultiply(fix);
+                        const baseAngleRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), treeParams.twigBaseAngle * Math.PI / 180);
+                        quaternion.premultiply(fix).premultiply(baseAngleRotation);
                         // Apply each instanced mesh - try with no offset first
                         twigInstancedMeshes.forEach(mesh => {
                             let finalPosition = new THREE.Vector3(position.x, position.y, position.z);
@@ -734,6 +740,8 @@ const createTreeVisualization = async () => {
                             
                             // Apply quaternion rotation
                             const quaternion = new THREE.Quaternion(orientationX, orientationY, orientationZ, orientationW);
+                            const baseAngleRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), treeParams.twigBaseAngle * Math.PI / 180);
+                            quaternion.premultiply(baseAngleRotation);
                             twigGeometry.setRotationFromQuaternion(quaternion);
                             
                             // Enable shadows
@@ -1042,6 +1050,28 @@ twigFolder.add(treeParams, 'twigAngleVariation', 0.0, 1.0).name('Angle Variation
     redrawTree();
 });
 
+twigFolder.add(treeParams, 'twigBaseAngle', -90, 90).name('Base Angle (deg)').onChange((value: number) => {
+    treeParams.twigBaseAngle = value;
+    redrawTree();
+});
+
+// Add wind animation controls
+const windFolder = gui.addFolder('Wind Animation');
+
+windFolder.add(treeParams, 'windEnabled').name('Enable Wind').onChange((value: boolean) => {
+    treeParams.windEnabled = value;
+});
+
+windFolder.add(treeParams, 'windStrength', 0.0, 1.0).name('Wind Strength').onChange((value: number) => {
+    treeParams.windStrength = value;
+});
+
+windFolder.add(treeParams, 'windSpeed', 0.1, 5.0).name('Wind Speed').onChange((value: number) => {
+    treeParams.windSpeed = value;
+});
+
+windFolder.open();
+
 // Add twig library controls
 if (twigLibrary) {
     const twigLibraryFolder = gui.addFolder('Twig Library');
@@ -1170,10 +1200,58 @@ function animate() {
     // Update controls for smooth damping
     controls.update();
     
-    // Vary the twig rotation slightly to simulate wind. Use sinuoidal function to create a more natural effect.
-    twigMeshes.forEach(mesh => {
-        // TODO
-    })
+    // Vary the twig rotation slightly to simulate wind. Use sinusoidal function to create a more natural effect.
+    if (treeParams.windEnabled) {
+        const time = Date.now() * 0.001 * treeParams.windSpeed;
+        
+        // Animate procedural twig meshes
+        twigMeshes.forEach((mesh, index) => {
+            // Use different phase for each mesh to create varied movement
+            const phase = index * 0.5;
+            const windRotation = Math.sin(time + phase) * treeParams.windStrength * 0.3;
+            
+            // Apply wind rotation around Z axis (sway)
+            mesh.rotation.z = windRotation;
+            
+            // Add a subtle X rotation for more natural movement
+            mesh.rotation.x = Math.cos(time * 0.7 + phase) * treeParams.windStrength * 0.1;
+        });
+        
+        // Animate instanced twig meshes
+        twigInstancedMeshes.forEach(instancedMesh => {
+            const matrix = new THREE.Matrix4();
+            const tempMatrix = new THREE.Matrix4();
+            
+            for (let i = 0; i < instancedMesh.count; i++) {
+                // Get the existing matrix
+                instancedMesh.getMatrixAt(i, matrix);
+                
+                // Extract position, rotation, and scale
+                const position = new THREE.Vector3();
+                const quaternion = new THREE.Quaternion();
+                const scale = new THREE.Vector3();
+                matrix.decompose(position, quaternion, scale);
+                
+                // Create wind rotation (different phase for each instance)
+                const phase = i * 0.3;
+                const windAngleZ = Math.sin(time + phase) * treeParams.windStrength * 0.3;
+                const windAngleX = Math.cos(time * 0.7 + phase) * treeParams.windStrength * 0.1;
+                
+                const windRotation = new THREE.Quaternion()
+                    .setFromAxisAngle(new THREE.Vector3(0, 0, 1), windAngleZ)
+                    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), windAngleX));
+                
+                // Apply wind rotation to existing rotation
+                quaternion.multiply(windRotation);
+                
+                // Recompose the matrix
+                matrix.compose(position, quaternion, scale);
+                instancedMesh.setMatrixAt(i, matrix);
+            }
+            
+            instancedMesh.instanceMatrix.needsUpdate = true;
+        });
+    }
 
     renderer.render(scene, camera);
 }
