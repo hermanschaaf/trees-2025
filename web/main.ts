@@ -339,7 +339,7 @@ const budMaterial = new THREE.MeshStandardMaterial({
 // Performance optimization: use instanced rendering for GLTF twigs
 let twigInstancedMeshes: THREE.InstancedMesh[] = [];
 let twigInstanceCount = 0;
-const maxTwigInstances = 1000; // Reasonable limit to prevent crashes
+const maxTwigInstances = 20000; // Reasonable limit to prevent crashes
 
 // Create twig geometries for different twig types
 const createTwigGeometry = async (twigType: string, scale: number): Promise<THREE.Object3D | null> => {
@@ -637,8 +637,7 @@ const createTreeVisualization = async () => {
         } else {
             // Use individual meshes for procedural twigs (they're lightweight)
             const twigPromises: Promise<void>[] = [];
-            const maxProceduralTwigs = 500; // Even procedural twigs should be limited
-            const proceduralCount = Math.min(twigCount, maxProceduralTwigs);
+            const proceduralCount = Math.min(twigCount, maxTwigInstances);
             
             for (let i = 0; i < proceduralCount; i++) {
                 const position = tree.twig_position(i);

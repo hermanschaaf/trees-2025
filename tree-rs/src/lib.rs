@@ -209,13 +209,15 @@ impl TreeObject {
                         continue;
                     }
                     
-                    // Check if this ring should have twigs
-                    let should_have_twigs = ring.radius <= twig_params.attachment_threshold;
+                    // Check if this ring should have twigs - make density affect all branches
+                    let density_chance = (twig_params.density * 0.3).min(1.0); // Scale 0.1-2.0 to 0.03-0.6, capped at 1.0
+                    let should_have_twigs = ring.radius <= twig_params.attachment_threshold 
+                        && rng.gen_range(0.0..1.0) < density_chance;
                     
                     // Also add random twigs to medium-sized branches for more natural distribution
                     let is_medium_branch_with_random_twigs = ring.radius > twig_params.attachment_threshold 
                         && ring.radius <= twig_params.attachment_threshold * 2.0 
-                        && rng.gen_range(0.0..1.0) < (twig_params.density * 0.3); // 30% chance scaled by density
+                        && rng.gen_range(0.0..1.0) < (twig_params.density * 0.1); // Reduced impact
                     
                     if should_have_twigs || is_medium_branch_with_random_twigs {
                         // Get branch direction (approximate from parent if available)
@@ -225,7 +227,7 @@ impl TreeObject {
                             Vec3::Y // Default upward direction for trunk
                         };
                         
-                        // Generate twigs at this termination point
+                        // Generate twigs at this position
                         Self::generate_twigs_at_position(
                             &mut self.tree.twigs,
                             cross_section.center,
@@ -880,9 +882,9 @@ impl TreeObject {
         use std::f32::consts::PI;
         
         // Determine number of twigs based on density and branch size
-        let base_twig_count = (twig_params.density * (branch_radius / twig_params.attachment_threshold)).max(0.1);
+        let base_twig_count = twig_params.density * 2.0; // More moderate scaling with density
         let twig_count = rng.gen_range((base_twig_count * 0.5)..=(base_twig_count * 1.5)) as u32;
-        let twig_count = twig_count.max(1).min(8); // Clamp between 1 and 8 twigs
+        let twig_count = twig_count.max(1).min(12); // Allow up to 12 twigs per position
         
         for i in 0..twig_count {
             // Random angle around the branch
