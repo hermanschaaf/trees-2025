@@ -110,7 +110,10 @@ const treeParams = {
     twigEnable: tree.twig_enable,
     twigDensity: tree.twig_density,
     twigScale: 1.0, // Default value, will be updated by the tree object
-    twigAngleVariation: tree.twig_angle_variation
+    twigAngleVariation: tree.twig_angle_variation,
+    // Debug parameters
+    debugMode: false,
+    colorByDepth: false
 };
 
 let ringMeshes: THREE.Mesh[] = [];
@@ -312,6 +315,41 @@ const createBarkMaterial = async (barkType: string): Promise<THREE.MeshStandardM
     }
     
     return material;
+};
+
+// Create debug material that uses vertex colors for depth visualization
+const createDebugMaterial = (): THREE.MeshBasicMaterial => {
+    return new THREE.MeshBasicMaterial({
+        vertexColors: true, // Use vertex colors
+        side: THREE.DoubleSide,
+    });
+};
+
+// Generate vertex colors based on depth values
+const generateDepthColors = (depths: number[]): Float32Array => {
+    const colors = new Float32Array(depths.length * 3);
+    
+    // Define color palette for different depths
+    const depthColors = [
+        [0.8, 0.2, 0.2], // Red for trunk (depth 0)
+        [1.0, 0.5, 0.0], // Orange for main branches (depth 1)
+        [1.0, 1.0, 0.0], // Yellow for secondary branches (depth 2)
+        [0.5, 1.0, 0.0], // Light green for tertiary branches (depth 3)
+        [0.0, 1.0, 0.0], // Green for small branches (depth 4)
+        [0.0, 0.8, 0.8], // Cyan for very small branches (depth 5)
+        [0.0, 0.4, 1.0], // Blue for tiny branches (depth 6+)
+    ];
+    
+    for (let i = 0; i < depths.length; i++) {
+        const depth = Math.min(depths[i], depthColors.length - 1);
+        const color = depthColors[depth];
+        
+        colors[i * 3] = color[0];     // R
+        colors[i * 3 + 1] = color[1]; // G
+        colors[i * 3 + 2] = color[2]; // B
+    }
+    
+    return colors;
 };
 
 // Create initial materials
@@ -567,8 +605,17 @@ const createTreeVisualization = async () => {
         const indices = new Uint32Array(treeMesh.indices);
         geometry.setIndex(new THREE.BufferAttribute(indices, 1));
         
+        // Handle depth-based coloring if debug mode is enabled
+        let material = ringMaterial;
+        if (treeParams.colorByDepth) {
+            // Generate vertex colors based on depth
+            const colors = generateDepthColors(treeMesh.depths);
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            material = createDebugMaterial();
+        }
+        
         // Create mesh
-        const mesh = new THREE.Mesh(geometry, ringMaterial);
+        const mesh = new THREE.Mesh(geometry, material);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         
@@ -1041,6 +1088,16 @@ if (barkLibrary) {
     
     barkFolder.open();
 }
+
+// Add debug controls
+const debugFolder = gui.addFolder('Debug');
+
+debugFolder.add(treeParams, 'colorByDepth').name('Color by Depth').onChange((value: boolean) => {
+    console.log(`Color by depth: ${value}`);
+    redrawTree();
+});
+
+debugFolder.open();
 
 // Add export controls
 const exportFolder = gui.addFolder('Export');

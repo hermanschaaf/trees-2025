@@ -47,6 +47,7 @@ pub struct TreeMesh {
     normals: Vec<f32>,
     uvs: Vec<f32>,
     indices: Vec<u32>,
+    depths: Vec<u32>, // Depth value for each vertex
 }
 
 #[wasm_bindgen]
@@ -69,6 +70,11 @@ impl TreeMesh {
     #[wasm_bindgen(getter)]
     pub fn indices(&self) -> Vec<u32> {
         self.indices.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn depths(&self) -> Vec<u32> {
+        self.depths.clone()
     }
 }
 
@@ -152,6 +158,7 @@ impl TreeObject {
         let root_cross_section = tree_structure::BranchCrossSection {
             center: Vec3::ZERO,
             orientation: Quat::IDENTITY,
+            depth: 0, // Root/trunk starts at depth 0
             component_rings: trunk_rings,
             parent_index: None,
             children_indices: Vec::new(),
@@ -557,6 +564,7 @@ impl TreeObject {
             let new_cross_section = tree_structure::BranchCrossSection {
                 center: next_center,
                 orientation: Quat::from_rotation_arc(Vec3::Y, bent_direction),
+                depth,
                 component_rings: child_rings,
                 parent_index: Some(current_cross_section_index),
                 children_indices: Vec::new(),
@@ -686,6 +694,7 @@ impl TreeObject {
         let trunk_cross_section = tree_structure::BranchCrossSection {
             center: center + main_direction * segment_length,
             orientation: Quat::from_rotation_arc(Vec3::Y, main_direction),
+            depth: depth + 1,
             component_rings: trunk_rings,
             parent_index: Some(parent_cross_section_index),
             children_indices: Vec::new(),
@@ -695,6 +704,7 @@ impl TreeObject {
         let branch_cross_section = tree_structure::BranchCrossSection {
             center: center + branch_direction * segment_length,
             orientation: Quat::from_rotation_arc(Vec3::Y, branch_direction),
+            depth: depth + 1,
             component_rings: branch_rings,
             parent_index: Some(parent_cross_section_index),
             children_indices: Vec::new(),
@@ -806,6 +816,7 @@ impl TreeObject {
             bent_direction,
             parent_ring_id.cross_section_index,
             child_ring,
+            depth,
         );
         
         let child_ring_id = tree_structure::RingId {
@@ -907,6 +918,7 @@ impl TreeObject {
         orientation_direction: glam::Vec3,
         parent_index: usize,
         ring: tree_structure::ComponentRing,
+        depth: u32,
     ) -> (usize, usize) {
         use glam::Quat;
         
@@ -915,6 +927,7 @@ impl TreeObject {
         let new_cross_section = tree_structure::BranchCrossSection {
             center,
             orientation: Quat::from_rotation_arc(glam::Vec3::Y, orientation_direction),
+            depth,
             component_rings: vec![ring],
             parent_index: Some(parent_index),
             children_indices: Vec::new(),
@@ -1060,6 +1073,7 @@ impl TreeObject {
             let first_root_cross_section = tree_structure::BranchCrossSection {
                 center: root_start_center,
                 orientation: Quat::from_rotation_arc(Vec3::Y, root_direction),
+                depth: 1, // Roots start at depth 1
                 component_rings: vec![root_ring],
                 parent_index: Some(root_cross_section_index),
                 children_indices: Vec::new(),
@@ -1144,6 +1158,7 @@ impl TreeObject {
         let next_cross_section = tree_structure::BranchCrossSection {
             center: next_center,
             orientation: glam::Quat::from_rotation_arc(Vec3::Y, bent_direction),
+            depth: depth + 1,
             component_rings: vec![next_ring],
             parent_index: Some(current_cross_section_index),
             children_indices: Vec::new(),
@@ -1288,6 +1303,7 @@ impl TreeObject {
             normals,
             uvs,
             indices: ring_mesh.indices,
+            depths: ring_mesh.depths,
         }
     }
 

@@ -16,6 +16,7 @@ pub struct BranchCrossSection {
     // Geometric properties
     pub center: Vec3,           // Position in 3D space
     pub orientation: Quat,      // Cross-section orientation
+    pub depth: u32,             // Hierarchical depth (0=trunk, 1=main branches, etc.)
 
     // Component rings at this position
     pub component_rings: Vec<ComponentRing>,
@@ -71,6 +72,7 @@ pub struct RingMesh {
     pub normals: Vec<Vec3>,
     pub uvs: Vec<Vec2>,
     pub indices: Vec<u32>,
+    pub depths: Vec<u32>, // Depth value for each vertex
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +155,7 @@ impl TreeStructure {
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
         let mut indices = Vec::new();
+        let mut depths = Vec::new();
 
         // Generate geometry for each cross-section (unified perimeter from multiple rings)
         let cross_section_geometries: Vec<CrossSectionGeometry> = self.cross_sections
@@ -163,18 +166,21 @@ impl TreeStructure {
         // Connect parent cross-sections to children with tubular surfaces
         for (cs_idx, cross_section) in self.cross_sections.iter().enumerate() {
             for &child_idx in &cross_section.children_indices {
-                self.connect_cross_section_perimeters(
+                self.connect_cross_section_perimeters_with_depth(
                     &cross_section_geometries[cs_idx],
                     &cross_section_geometries[child_idx],
+                    cross_section.depth,
+                    self.cross_sections[child_idx].depth,
                     &mut vertices,
                     &mut normals,
                     &mut uvs,
                     &mut indices,
+                    &mut depths,
                 );
             }
         }
 
-        RingMesh { vertices, normals, uvs, indices }
+        RingMesh { vertices, normals, uvs, indices, depths }
     }
     
     fn connect_cross_section_perimeters(
@@ -193,6 +199,71 @@ impl TreeStructure {
         for i in 0..resolution {
             vertices.push(parent_geo.points[i]);
             vertices.push(child_geo.points[i]);
+        }
+
+        // Calculate surface normals for tubular connection
+        for i in 0..resolution {
+            let next_i = (i + 1) % resolution;
+            
+            // Get quad vertices
+            let p1 = parent_geo.points[i];
+            let p2 = child_geo.points[i];
+            let p3 = child_geo.points[next_i];
+            let p4 = parent_geo.points[next_i];
+            
+            // Calculate face normal for this section of tube
+            let edge1 = p2 - p1;
+            let edge2 = p4 - p1;
+            let face_normal = edge1.cross(edge2).normalize();
+            
+            // Use outward-pointing normals
+            normals.push(face_normal);
+            normals.push(face_normal);
+        }
+
+        // Generate UVs (u = around circumference, v = along branch)
+        for i in 0..resolution {
+            let u = i as f32 / resolution as f32;
+            uvs.push(Vec2::new(u, 0.0)); // Parent ring
+            uvs.push(Vec2::new(u, 1.0)); // Child ring
+        }
+
+        // Create quad faces between ring perimeters (tubular surface)
+        for i in 0..resolution {
+            let next_i = (i + 1) % resolution;
+
+            // Indices for the quad connecting perimeter points
+            let p1 = base_vertex_idx + (i * 2) as u32;       // parent current
+            let p2 = base_vertex_idx + (i * 2 + 1) as u32;   // child current  
+            let p3 = base_vertex_idx + (next_i * 2 + 1) as u32; // child next
+            let p4 = base_vertex_idx + (next_i * 2) as u32;  // parent next
+
+            // Two triangles per quad forming the tube surface
+            indices.extend_from_slice(&[p1, p2, p3, p1, p3, p4]);
+        }
+    }
+
+    fn connect_cross_section_perimeters_with_depth(
+        &self,
+        parent_geo: &CrossSectionGeometry,
+        child_geo: &CrossSectionGeometry,
+        parent_depth: u32,
+        child_depth: u32,
+        vertices: &mut Vec<Vec3>,
+        normals: &mut Vec<Vec3>,
+        uvs: &mut Vec<Vec2>,
+        indices: &mut Vec<u32>,
+        depths: &mut Vec<u32>,
+    ) {
+        let base_vertex_idx = vertices.len() as u32;
+        let resolution = parent_geo.points.len().min(child_geo.points.len());
+
+        // Add vertices from both ring perimeters with depth information
+        for i in 0..resolution {
+            vertices.push(parent_geo.points[i]);
+            vertices.push(child_geo.points[i]);
+            depths.push(parent_depth);
+            depths.push(child_depth);
         }
 
         // Calculate surface normals for tubular connection
