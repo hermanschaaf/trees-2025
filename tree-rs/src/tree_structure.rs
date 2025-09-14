@@ -176,8 +176,7 @@ impl TreeStructure {
 
         RingMesh { vertices, normals, uvs, indices }
     }
-
-
+    
     fn connect_cross_section_perimeters(
         &self,
         parent_geo: &CrossSectionGeometry,
@@ -236,32 +235,6 @@ impl TreeStructure {
             // Two triangles per quad forming the tube surface
             indices.extend_from_slice(&[p1, p2, p3, p1, p3, p4]);
         }
-    }
-
-    fn handle_branch_split(
-        &self,
-        _parent_geo: &RingGeometry,
-        _children_geo: &[RingGeometry],
-        _branch_angles: &[f32], // Where each child branches off
-    ) {
-        // TODO: Create transition geometry that smoothly splits the parent ring
-        // into multiple child rings
-    }
-
-    fn connect_ring_segment(
-        &self,
-        parent_geo: &RingGeometry,
-        child_geo: &RingGeometry,
-        start_angle: f32,
-        end_angle: f32,
-    ) {
-        // This is a placeholder for segment connection logic
-        // In a full implementation, this would create the mesh data
-        // for connecting a portion of parent ring to child ring
-        let _parent_resolution = parent_geo.points.len();
-        let _child_resolution = child_geo.points.len();
-        
-        // TODO: Implement segment connection logic
     }
 
     fn angle_range_to_indices(

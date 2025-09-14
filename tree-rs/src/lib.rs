@@ -39,17 +39,6 @@ pub struct TreeObject {
 }
 
 #[wasm_bindgen]
-pub struct Branch {
-    pub length: f32,
-    pub start_radius: f32,
-    pub end_radius: f32,
-    pub depth: u32,
-    pub direction: wasm_math::Quaternion,
-    pub start: wasm_math::Vector3d,
-    pub end: wasm_math::Vector3d,
-}
-
-#[wasm_bindgen]
 pub struct TreeMesh {
     vertices: Vec<f32>,
     normals: Vec<f32>,
