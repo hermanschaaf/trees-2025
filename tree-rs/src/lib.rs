@@ -24,6 +24,7 @@ pub struct TreeObject {
     pub trunk_ring_spread: f32, // 0.0-2.0: how spread out trunk rings are
     pub segment_length_variation: f32, // 0.0-1.0: how much segment lengths vary
     pub trunk_size: f32, // 0.2-2.0: base trunk radius multiplier
+    pub branch_azimuth_variation: f32, // 0.0-1.0: 3D branching spread
     // Root system parameters
     pub root_enable: bool, // Whether to generate roots
     pub root_depth: f32, // How deep roots go (0.5-3.0)
@@ -91,6 +92,7 @@ impl TreeObject {
             trunk_ring_spread: 0.5,   // Default moderate spread
             segment_length_variation: 0.3, // Default moderate variation
             trunk_size: 1.0, // Default trunk size (0.5 base radius)
+            branch_azimuth_variation: 0.5, // Default moderate 3D spread
             // Root system defaults
             root_enable: true,
             root_depth: 1.5,
@@ -170,6 +172,7 @@ impl TreeObject {
             radius_taper,
             self.trunk_height,        // Pass trunk height for branching logic
             self.segment_length_variation, // Pass segment variation
+            self.branch_azimuth_variation, // Pass 3D branching parameter
         );
         
         // Generate root system if enabled
@@ -428,6 +431,7 @@ impl TreeObject {
         radius_taper: f32,
         trunk_height: f32,
         segment_length_variation: f32,
+        branch_azimuth_variation: f32,
     ) {
         use rand::Rng;
         use glam::{Vec3, Quat};
@@ -495,6 +499,7 @@ impl TreeObject {
                 radius_taper,
                 trunk_height,
                 segment_length_variation,
+                branch_azimuth_variation,
             );
         } else {
             // ALL rings continue as trunk - create next cross-section with all rings
@@ -545,6 +550,7 @@ impl TreeObject {
                 radius_taper,
                 trunk_height,
                 segment_length_variation,
+                branch_azimuth_variation,
             );
         }
     }
@@ -565,24 +571,35 @@ impl TreeObject {
         radius_taper: f32,
         trunk_height: f32,
         segment_length_variation: f32,
+        branch_azimuth_variation: f32,
     ) {
         use rand::Rng;
         use glam::{Vec3, Quat};
         
-        // Create branch direction
+        // Create branch direction with 3D spherical branching
         let angle_min = branch_angle_range.0.min(branch_angle_range.1);
         let angle_max = branch_angle_range.1.max(branch_angle_range.0);
         let branch_angle = rng.gen_range(angle_min..=angle_max).to_radians();
         
+        // Traditional 2D branching (base method)
         let up_component = Vec3::Y;
         let perpendicular = if main_direction.cross(up_component).length() > 0.1 {
             main_direction.cross(up_component).normalize()
         } else {
             Vec3::X
         };
+        let planar_rotation = Quat::from_axis_angle(perpendicular, branch_angle);
+        let planar_direction = (planar_rotation * main_direction).normalize();
         
-        let branch_rotation = Quat::from_axis_angle(perpendicular, branch_angle);
-        let branch_direction = (branch_rotation * main_direction).normalize();
+        // Apply 3D spherical branching based on azimuth variation parameter
+        let branch_direction = if branch_azimuth_variation > 0.0 {
+            // Random azimuthal rotation around the main growth direction for 3D spread
+            let azimuth_angle = rng.gen_range(0.0..2.0 * std::f32::consts::PI) * branch_azimuth_variation;
+            let azimuth_rotation = Quat::from_axis_angle(main_direction, azimuth_angle);
+            (azimuth_rotation * planar_direction).normalize()
+        } else {
+            planar_direction
+        };
         
         // Create trunk continuation cross-section - SPLIT rings between trunk and branch
         // Use gentler tapering similar to normal trunk growth
@@ -673,6 +690,7 @@ impl TreeObject {
             radius_taper,
             trunk_height,
             segment_length_variation,
+            branch_azimuth_variation,
         );
         
         Self::generate_coordinated_recursive_static(
@@ -690,6 +708,7 @@ impl TreeObject {
             radius_taper,
             trunk_height,
             segment_length_variation,
+            branch_azimuth_variation,
         );
     }
     
@@ -1297,6 +1316,11 @@ impl TreeObject {
 
     pub fn set_trunk_size(&mut self, trunk_size: f32) {
         self.trunk_size = trunk_size.max(0.2).min(2.0); // Clamp between 0.2 and 2.0
+        self.regenerate_tree();
+    }
+
+    pub fn set_branch_azimuth_variation(&mut self, variation: f32) {
+        self.branch_azimuth_variation = variation.max(0.0).min(1.0); // Clamp between 0.0 and 1.0
         self.regenerate_tree();
     }
 
