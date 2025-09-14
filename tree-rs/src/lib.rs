@@ -23,6 +23,7 @@ pub struct TreeObject {
     pub radius_taper: f32,
     pub trunk_ring_spread: f32, // 0.0-2.0: how spread out trunk rings are
     pub segment_length_variation: f32, // 0.0-1.0: how much segment lengths vary
+    pub trunk_size: f32, // 0.2-2.0: base trunk radius multiplier
     // Root system parameters
     pub root_enable: bool, // Whether to generate roots
     pub root_depth: f32, // How deep roots go (0.5-3.0)
@@ -89,6 +90,7 @@ impl TreeObject {
             radius_taper: 0.8,
             trunk_ring_spread: 0.5,   // Default moderate spread
             segment_length_variation: 0.3, // Default moderate variation
+            trunk_size: 1.0, // Default trunk size (0.5 base radius)
             // Root system defaults
             root_enable: true,
             root_depth: 1.5,
@@ -199,7 +201,7 @@ impl TreeObject {
                 attachment_threshold: 0.05, // Attach twigs to branches with radius < 0.05
             };
             
-            // Find termination points in all cross-sections (excluding roots)
+            // Find twig attachment points in all cross-sections (excluding roots)
             for (i, cross_section) in self.tree.cross_sections.iter().enumerate() {
                 for ring in &cross_section.component_rings {
                     // Skip root rings - don't generate twigs on roots
@@ -207,11 +209,15 @@ impl TreeObject {
                         continue;
                     }
                     
-                    // Check if this is a termination point (small radius or no children)
-                    let is_termination = ring.radius <= twig_params.attachment_threshold 
-                        || cross_section.children_indices.is_empty();
+                    // Check if this ring should have twigs
+                    let should_have_twigs = ring.radius <= twig_params.attachment_threshold;
                     
-                    if is_termination {
+                    // Also add random twigs to medium-sized branches for more natural distribution
+                    let is_medium_branch_with_random_twigs = ring.radius > twig_params.attachment_threshold 
+                        && ring.radius <= twig_params.attachment_threshold * 2.0 
+                        && rng.gen_range(0.0..1.0) < (twig_params.density * 0.3); // 30% chance scaled by density
+                    
+                    if should_have_twigs || is_medium_branch_with_random_twigs {
                         // Get branch direction (approximate from parent if available)
                         let branch_direction = if i > 0 {
                             (cross_section.center - self.tree.cross_sections[0].center).normalize()
@@ -246,8 +252,8 @@ impl TreeObject {
         };
         let mut rings = Vec::new();
         
-        // Fixed base trunk radius - overall segment should maintain this cross-sectional area
-        let base_trunk_radius = 0.5;
+        // Base trunk radius controlled by trunk_size parameter
+        let base_trunk_radius = 0.5 * self.trunk_size;
         let target_area = PI * base_trunk_radius * base_trunk_radius;
         
         if ring_count == 1 {
@@ -577,7 +583,8 @@ impl TreeObject {
         let branch_direction = (branch_rotation * main_direction).normalize();
         
         // Create trunk continuation cross-section - SPLIT rings between trunk and branch
-        let segment_taper_factor = 0.5; // More aggressive tapering for branches
+        // Use gentler tapering similar to normal trunk growth
+        let segment_taper_factor = 0.15; // Gentler tapering for branches
         let segment_taper = 1.0 - (1.0 - radius_taper) * segment_taper_factor;
         
         let mut trunk_rings = Vec::new();
@@ -590,12 +597,12 @@ impl TreeObject {
                 let trunk_child = Self::create_child_ring_from_parent(
                     parent_ring,
                     tree_structure::RingId { cross_section_index: parent_cross_section_index, ring_index: 0 },
-                    segment_taper * 0.9 // Slightly taper trunk when branching
+                    segment_taper * 0.95 // Very light additional taper for trunk when branching
                 );
                 let branch_child = Self::create_child_ring_from_parent(
                     parent_ring,
                     tree_structure::RingId { cross_section_index: parent_cross_section_index, ring_index: 0 },
-                    segment_taper * 0.6 // Much smaller branch
+                    segment_taper * 0.8 // Moderately smaller branch (was 0.6)
                 );
                 trunk_rings.push(trunk_child);
                 branch_rings.push(branch_child);
@@ -704,7 +711,7 @@ impl TreeObject {
         use glam::{Vec3, Quat};
         
         // Stop recursion if too deep or radius too small
-        if depth >= max_depth || current_radius < 0.05 {
+        if depth >= max_depth || current_radius < 0.01 {
             return;
         }
         
@@ -1283,6 +1290,11 @@ impl TreeObject {
 
     pub fn set_segment_length_variation(&mut self, segment_length_variation: f32) {
         self.segment_length_variation = segment_length_variation.max(0.0).min(1.0); // Clamp between 0.0 and 1.0
+        self.regenerate_tree();
+    }
+
+    pub fn set_trunk_size(&mut self, trunk_size: f32) {
+        self.trunk_size = trunk_size.max(0.2).min(2.0); // Clamp between 0.2 and 2.0
         self.regenerate_tree();
     }
 

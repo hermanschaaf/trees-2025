@@ -95,6 +95,7 @@ const treeParams = {
     radiusTaper: tree.radius_taper,
     trunkRingSpread: tree.trunk_ring_spread,
     segmentLengthVariation: 0.3, // Default value since it's not exposed yet
+    trunkSize: tree.trunk_size, // Base trunk radius multiplier
     radius: 0.5,
     radialSegments: 32,
     // Root system parameters
@@ -786,6 +787,12 @@ treeFolder.add(treeParams, 'splitHeight', 0.5, 8).onChange((value: number) => {
     redrawTree();
 });
 
+treeFolder.add(treeParams, 'trunkSize', 0.2, 2.0).name('Trunk Size').onChange((value: number) => {
+    tree.set_trunk_size(value);
+    treeParams.trunkSize = value;
+    redrawTree();
+});
+
 // Add advanced tree generation controls
 const advancedFolder = gui.addFolder('Advanced Parameters');
 
@@ -837,7 +844,7 @@ advancedFolder.add(treeParams, 'maxDepth', 1, 12).name('Max Depth').onChange((va
     redrawTree();
 });
 
-advancedFolder.add(treeParams, 'radiusTaper', 0.1, 1.0).name('Radius Taper').onChange((value: number) => {
+advancedFolder.add(treeParams, 'radiusTaper', 0.1, 0.8).name('Radius Taper').onChange((value: number) => {
     tree.set_radius_taper(value);
     treeParams.radiusTaper = value;
     redrawTree();
