@@ -94,7 +94,7 @@ impl TreeObject {
             bend_angle_max: 15.0,
             branch_frequency_min: 2,
             branch_frequency_max: 4,
-            max_depth: 12, // Increase to allow longer trunk growth
+            max_depth: 20, // Increase to allow more branching
             radius_taper: 0.8,
             trunk_ring_spread: 0.5,   // Default moderate spread
             segment_length_variation: 0.3, // Default moderate variation
@@ -180,7 +180,7 @@ impl TreeObject {
             branch_frequency_range,
             max_depth,
             radius_taper,
-            self.trunk_height,        // Pass trunk height for branching logic
+            self.split_height,        // Pass split height for branching logic
             self.segment_length_variation, // Pass segment variation
             self.branch_azimuth_variation, // Pass 3D branching parameter
             self.max_branch_reach,    // Pass max branch reach parameter
@@ -456,11 +456,18 @@ impl TreeObject {
         }
         
         // Stop if branch has extended too many segments at current depth (prevents long tendrils)
+        // For trunk (depth 0-2), allow enough segments to reach target height
         let max_segments_at_depth = match depth {
-            0..=2 => 20,  // Trunk and main branches can be long
+            0..=2 => {
+                // Calculate minimum segments needed to reach split height
+                let min_segments_for_height = (trunk_height / segment_length).ceil() as u32;
+                (min_segments_for_height + 10).max(20)  // Trunk: ensure we can reach target height + some extra
+            },
             3..=5 => 8,   // Secondary branches medium length
             6..=8 => 4,   // Tertiary branches short
-            _ => 2,       // Deep branches very short
+            9..=12 => 3,  // Deep branches short
+            13..=16 => 2, // Very deep branches very short
+            _ => 1,       // Extremely deep branches minimal
         };
         if segments_at_current_depth >= max_segments_at_depth {
             return;
@@ -832,8 +839,8 @@ impl TreeObject {
         let freq_max = branch_frequency_range.1.max(freq_min);
         let segment_branch_ready = segments_since_branch >= rng.gen_range(freq_min..=freq_max);
         
-        // Only start branching after reaching the desired trunk height
-        // Height parameter controls how much trunk we want before branching starts
+        // Only start branching after reaching the split height
+        // Split height controls how much trunk we want before branching starts
         let min_branching_height = trunk_height;
         let height_allows_branching = current_height >= min_branching_height;
         
@@ -1117,7 +1124,7 @@ impl TreeObject {
         use glam::{Vec3, Quat, Vec2};
         
         // Stop if too deep, too small, or reached max depth
-        if depth > 15 || current_radius < 0.01 {
+        if depth > 25 || current_radius < 0.01 {
             return;
         }
         
@@ -1186,7 +1193,7 @@ impl TreeObject {
         // Occasionally create side root branches
         let should_branch = depth > 2 && rng.gen_range(0.0..=1.0) < 0.3; // 30% chance to branch
         
-        if should_branch && depth < 10 {
+        if should_branch && depth < 15 {
             // Create a side root branch
             let branch_angle = rng.gen_range(30.0f32..90.0f32).to_radians();
             let branch_axis = Vec3::new(rng.gen_range(-1.0..=1.0), 0.2, rng.gen_range(-1.0..=1.0)).normalize();

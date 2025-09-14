@@ -325,28 +325,53 @@ const createDebugMaterial = (): THREE.MeshBasicMaterial => {
     });
 };
 
-// Generate vertex colors based on depth values
+// Generate vertex colors based on depth values, dynamically scaled to max_depth
 const generateDepthColors = (depths: number[]): Float32Array => {
     const colors = new Float32Array(depths.length * 3);
-    
-    // Define color palette for different depths
-    const depthColors = [
-        [0.8, 0.2, 0.2], // Red for trunk (depth 0)
-        [1.0, 0.5, 0.0], // Orange for main branches (depth 1)
-        [1.0, 1.0, 0.0], // Yellow for secondary branches (depth 2)
-        [0.5, 1.0, 0.0], // Light green for tertiary branches (depth 3)
-        [0.0, 1.0, 0.0], // Green for small branches (depth 4)
-        [0.0, 0.8, 0.8], // Cyan for very small branches (depth 5)
-        [0.0, 0.4, 1.0], // Blue for tiny branches (depth 6+)
-    ];
+    const maxDepth = treeParams.maxDepth;
     
     for (let i = 0; i < depths.length; i++) {
-        const depth = Math.min(depths[i], depthColors.length - 1);
-        const color = depthColors[depth];
+        const depth = depths[i];
+        const normalizedDepth = depth / Math.max(maxDepth - 1, 1); // Normalize to 0-1 range
         
-        colors[i * 3] = color[0];     // R
-        colors[i * 3 + 1] = color[1]; // G
-        colors[i * 3 + 2] = color[2]; // B
+        // Color interpolation from red (trunk) to blue (max depth)
+        let r: number, g: number, b: number;
+        
+        if (normalizedDepth <= 0.16) { // 0-16% = Red to Orange
+            const t = normalizedDepth / 0.16;
+            r = 0.8 + t * 0.2;  // 0.8 -> 1.0
+            g = 0.2 + t * 0.3;  // 0.2 -> 0.5
+            b = 0.2 - t * 0.2;  // 0.2 -> 0.0
+        } else if (normalizedDepth <= 0.33) { // 16-33% = Orange to Yellow
+            const t = (normalizedDepth - 0.16) / 0.17;
+            r = 1.0;            // 1.0 -> 1.0
+            g = 0.5 + t * 0.5;  // 0.5 -> 1.0
+            b = 0.0;            // 0.0 -> 0.0
+        } else if (normalizedDepth <= 0.5) { // 33-50% = Yellow to Light Green
+            const t = (normalizedDepth - 0.33) / 0.17;
+            r = 1.0 - t * 0.5;  // 1.0 -> 0.5
+            g = 1.0;            // 1.0 -> 1.0
+            b = 0.0;            // 0.0 -> 0.0
+        } else if (normalizedDepth <= 0.66) { // 50-66% = Light Green to Green
+            const t = (normalizedDepth - 0.5) / 0.16;
+            r = 0.5 - t * 0.5;  // 0.5 -> 0.0
+            g = 1.0;            // 1.0 -> 1.0
+            b = 0.0;            // 0.0 -> 0.0
+        } else if (normalizedDepth <= 0.83) { // 66-83% = Green to Cyan
+            const t = (normalizedDepth - 0.66) / 0.17;
+            r = 0.0;            // 0.0 -> 0.0
+            g = 1.0 - t * 0.2;  // 1.0 -> 0.8
+            b = 0.0 + t * 0.8;  // 0.0 -> 0.8
+        } else { // 83-100% = Cyan to Blue
+            const t = (normalizedDepth - 0.83) / 0.17;
+            r = 0.0;            // 0.0 -> 0.0
+            g = 0.8 - t * 0.4;  // 0.8 -> 0.4
+            b = 0.8 + t * 0.2;  // 0.8 -> 1.0
+        }
+        
+        colors[i * 3] = r;
+        colors[i * 3 + 1] = g;
+        colors[i * 3 + 2] = b;
     }
     
     return colors;
@@ -583,7 +608,7 @@ const createTreeVisualization = async () => {
     twigInstanceCount = 0;
     
     // Generate mesh from Rust
-    const treeMesh = tree.generate_tree_mesh(16); // 16 points per ring
+    const treeMesh = tree.generate_tree_mesh(7); // 7 points per ring
     
     if (treeMesh.vertices.length > 0) {
         // Create Three.js geometry from the generated mesh
@@ -896,7 +921,7 @@ advancedFolder.add(treeParams, 'branchFrequencyMax', 2, 15).name('Max Branch Fre
     redrawTree();
 });
 
-advancedFolder.add(treeParams, 'maxDepth', 1, 12).name('Max Depth').onChange((value: number) => {
+advancedFolder.add(treeParams, 'maxDepth', 1, 20).name('Max Depth').onChange((value: number) => {
     tree.set_max_depth(Math.floor(value));
     treeParams.maxDepth = Math.floor(value);
     redrawTree();
@@ -1106,7 +1131,7 @@ const exportFolder = gui.addFolder('Export');
 const downloadGltf = () => {
     try {
         console.log('Exporting GLTF...');
-        const gltfJson = tree.export_gltf(16); // Use same resolution as mesh generation
+        const gltfJson = tree.export_gltf(7); // Use same resolution as mesh generation
         console.log('GLTF exported successfully');
         
         // Create blob and download
