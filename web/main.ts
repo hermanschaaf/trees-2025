@@ -97,6 +97,7 @@ const treeParams = {
     segmentLengthVariation: 0.3, // Default value since it's not exposed yet
     trunkSize: tree.trunk_size, // Base trunk radius multiplier
     branchAzimuthVariation: tree.branch_azimuth_variation, // 3D branch spread
+    maxBranchReach: tree.max_branch_reach, // Maximum branch distance from trunk
     radius: 0.5,
     radialSegments: 32,
     // Root system parameters
@@ -787,7 +788,7 @@ treeFolder.add(treeParams, 'splitHeight', 0.5, 8).onChange((value: number) => {
     redrawTree();
 });
 
-treeFolder.add(treeParams, 'trunkSize', 0.2, 2.0).name('Trunk Size').onChange((value: number) => {
+treeFolder.add(treeParams, 'trunkSize', 0.1, 10.0).name('Trunk Size').onChange((value: number) => {
     tree.set_trunk_size(value);
     treeParams.trunkSize = value;
     redrawTree();
@@ -795,6 +796,11 @@ treeFolder.add(treeParams, 'trunkSize', 0.2, 2.0).name('Trunk Size').onChange((v
 treeFolder.add(treeParams, 'branchAzimuthVariation', 0.0, 1.0).name('3D Branch Spread').onChange((value: number) => {
     tree.set_branch_azimuth_variation(value);
     treeParams.branchAzimuthVariation = value;
+    redrawTree();
+});
+treeFolder.add(treeParams, 'maxBranchReach', 2.0, 50.0).name('Max Branch Reach').onChange((value: number) => {
+    tree.set_max_branch_reach(value);
+    treeParams.maxBranchReach = value;
     redrawTree();
 });
 

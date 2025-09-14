@@ -25,6 +25,7 @@ pub struct TreeObject {
     pub segment_length_variation: f32, // 0.0-1.0: how much segment lengths vary
     pub trunk_size: f32, // 0.2-2.0: base trunk radius multiplier
     pub branch_azimuth_variation: f32, // 0.0-1.0: 3D branching spread
+    pub max_branch_reach: f32, // 2.0-10.0: max distance branches can extend from trunk center
     // Root system parameters
     pub root_enable: bool, // Whether to generate roots
     pub root_depth: f32, // How deep roots go (0.5-3.0)
@@ -91,8 +92,9 @@ impl TreeObject {
             radius_taper: 0.8,
             trunk_ring_spread: 0.5,   // Default moderate spread
             segment_length_variation: 0.3, // Default moderate variation
-            trunk_size: 1.0, // Default trunk size (0.5 base radius)
+            trunk_size: 3.0, // Default trunk size (0.5 base radius)
             branch_azimuth_variation: 0.5, // Default moderate 3D spread
+            max_branch_reach: 50.0, // Default generous branch reach
             // Root system defaults
             root_enable: true,
             root_depth: 1.5,
@@ -163,6 +165,7 @@ impl TreeObject {
             Vec3::new(0.0, 1.0, 0.0), // growth_direction (up)
             0,                        // depth
             0,                        // segments_since_branch
+            0,                        // segments_at_current_depth (start at 0)
             &mut rng,
             trunk_segment_length,     // Use calculated trunk segment length
             branch_angle_range,
@@ -173,6 +176,7 @@ impl TreeObject {
             self.trunk_height,        // Pass trunk height for branching logic
             self.segment_length_variation, // Pass segment variation
             self.branch_azimuth_variation, // Pass 3D branching parameter
+            self.max_branch_reach,    // Pass max branch reach parameter
         );
         
         // Generate root system if enabled
@@ -422,6 +426,7 @@ impl TreeObject {
         growth_direction: glam::Vec3,
         depth: u32,
         segments_since_branch: u32,
+        segments_at_current_depth: u32,
         rng: &mut rand::rngs::SmallRng,
         segment_length: f32,
         branch_angle_range: (f32, f32),
@@ -432,6 +437,7 @@ impl TreeObject {
         trunk_height: f32,
         segment_length_variation: f32,
         branch_azimuth_variation: f32,
+        max_branch_reach: f32,
     ) {
         use rand::Rng;
         use glam::{Vec3, Quat};
@@ -439,6 +445,17 @@ impl TreeObject {
         // Stop recursion if too deep
         if depth >= max_depth {
             // This is a termination point - generate twigs if enabled
+            return;
+        }
+        
+        // Stop if branch has extended too many segments at current depth (prevents long tendrils)
+        let max_segments_at_depth = match depth {
+            0..=2 => 20,  // Trunk and main branches can be long
+            3..=5 => 8,   // Secondary branches medium length
+            6..=8 => 4,   // Tertiary branches short
+            _ => 2,       // Deep branches very short
+        };
+        if segments_at_current_depth >= max_segments_at_depth {
             return;
         }
         
@@ -458,9 +475,23 @@ impl TreeObject {
             return;
         }
         
+        // Stop if branch has extended extremely far from trunk center (fallback safety check)
+        let distance_from_trunk = current_center.length(); // Distance from origin (trunk base)
+        if distance_from_trunk > max_branch_reach * 1.5 { // Much more generous limit, mostly for safety
+            return;
+        }
+        
         // Add some bend to the growth direction for natural curves
-        let bend_min = bend_angle_range.0.min(bend_angle_range.1);
-        let bend_max = bend_angle_range.1.max(bend_angle_range.0);
+        // Reduce bending for trunk segments to keep them straighter
+        let bend_reduction_factor = match depth {
+            0..=1 => 0.1,   // Trunk: only 10% of bend (very straight)
+            2..=3 => 0.3,   // Main branches: 30% of bend
+            4..=5 => 0.6,   // Secondary branches: 60% of bend
+            _ => 1.0,       // Small branches: full bend (natural curves)
+        };
+        
+        let bend_min = bend_angle_range.0.min(bend_angle_range.1) * bend_reduction_factor;
+        let bend_max = bend_angle_range.1.max(bend_angle_range.0) * bend_reduction_factor;
         let bend_angle = rng.gen_range(bend_min..=bend_max).to_radians();
         let bend_axis = Vec3::new(rng.gen_range(-1.0..=1.0), 0.0, rng.gen_range(-1.0..=1.0)).normalize();
         let bend_rotation = Quat::from_axis_angle(bend_axis, bend_angle);
@@ -500,6 +531,7 @@ impl TreeObject {
                 trunk_height,
                 segment_length_variation,
                 branch_azimuth_variation,
+                max_branch_reach,
             );
         } else {
             // ALL rings continue as trunk - create next cross-section with all rings
@@ -541,6 +573,7 @@ impl TreeObject {
                 bent_direction,
                 depth,
                 segments_since_branch + 1,
+                segments_at_current_depth + 1, // Increment segment count at current depth
                 rng,
                 segment_length,
                 branch_angle_range,
@@ -551,6 +584,7 @@ impl TreeObject {
                 trunk_height,
                 segment_length_variation,
                 branch_azimuth_variation,
+                max_branch_reach,
             );
         }
     }
@@ -572,6 +606,7 @@ impl TreeObject {
         trunk_height: f32,
         segment_length_variation: f32,
         branch_azimuth_variation: f32,
+        max_branch_reach: f32,
     ) {
         use rand::Rng;
         use glam::{Vec3, Quat};
@@ -681,6 +716,7 @@ impl TreeObject {
             main_direction,
             depth + 1,
             0, // Reset segment counter
+            0, // Reset segments at depth counter for new branch
             rng,
             segment_length,
             branch_angle_range,
@@ -691,6 +727,7 @@ impl TreeObject {
             trunk_height,
             segment_length_variation,
             branch_azimuth_variation,
+            max_branch_reach,
         );
         
         Self::generate_coordinated_recursive_static(
@@ -699,6 +736,7 @@ impl TreeObject {
             branch_direction,
             depth + 1,
             0, // Reset segment counter
+            0, // Reset segments at depth counter for new branch
             rng,
             segment_length,
             branch_angle_range,
@@ -709,6 +747,7 @@ impl TreeObject {
             trunk_height,
             segment_length_variation,
             branch_azimuth_variation,
+            max_branch_reach,
         );
     }
     
@@ -1315,12 +1354,17 @@ impl TreeObject {
     }
 
     pub fn set_trunk_size(&mut self, trunk_size: f32) {
-        self.trunk_size = trunk_size.max(0.2).min(2.0); // Clamp between 0.2 and 2.0
+        self.trunk_size = trunk_size.max(0.1).min(10.0); // Clamp between 0.1 and 10.0
         self.regenerate_tree();
     }
 
     pub fn set_branch_azimuth_variation(&mut self, variation: f32) {
         self.branch_azimuth_variation = variation.max(0.0).min(1.0); // Clamp between 0.0 and 1.0
+        self.regenerate_tree();
+    }
+
+    pub fn set_max_branch_reach(&mut self, reach: f32) {
+        self.max_branch_reach = reach.max(2.0).min(50.0); // Clamp between 2.0 and 50.0
         self.regenerate_tree();
     }
 
