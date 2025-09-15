@@ -1,0 +1,28 @@
+{
+  "name": "@trees/root",
+  "version": "1.0.0",
+  "description": "Cross-platform tree generation and visualization application",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=packages/web",
+    "dev:core": "npm run dev --workspace=packages/core",
+    "build": "npm run build:engine && npm run build:shared && npm run build:core && npm run build:web",
+    "build:engine": "cd packages/tree-engine && RUSTFLAGS='--cfg getrandom_backend=\"wasm_js\"' wasm-pack build --target web",
+    "build:shared": "npm run build --workspace=packages/shared",
+    "build:core": "npm run build --workspace=packages/core",
+    "build:web": "npm run build --workspace=packages/web",
+    "clean": "rm -rf packages/*/dist packages/*/node_modules packages/tree-engine/pkg",
+    "install:all": "npm install",
+    "type-check": "npm run type-check --workspace=packages/core"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
