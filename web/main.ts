@@ -631,6 +631,10 @@ const createTreeVisualization = async () => {
         const uvs = new Float32Array(treeMesh.uvs);
         geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
         
+        // Set height factors for bark texture blending
+        const heightFactors = new Float32Array(treeMesh.height_factors);
+        geometry.setAttribute('heightFactor', new THREE.BufferAttribute(heightFactors, 1));
+        
         // Set indices
         const indices = new Uint32Array(treeMesh.indices);
         geometry.setIndex(new THREE.BufferAttribute(indices, 1));

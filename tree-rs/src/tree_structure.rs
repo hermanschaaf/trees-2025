@@ -49,6 +49,7 @@ pub struct RingMesh {
     pub uvs: Vec<Vec2>,
     pub indices: Vec<u32>,
     pub depths: Vec<u32>, // Depth value for each vertex
+    pub height_factors: Vec<f32>, // Height-based blend factor for bark texture (0=trunk, 1=high branches)
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,7 @@ impl TreeStructure {
         let mut uvs = Vec::new();
         let mut indices = Vec::new();
         let mut depths = Vec::new();
+        let mut height_factors = Vec::new();
 
         // Generate geometry for each cross-section (unified perimeter from multiple rings)
         let cross_section_geometries: Vec<CrossSectionGeometry> = self.cross_sections
@@ -114,11 +116,12 @@ impl TreeStructure {
                     &mut uvs,
                     &mut indices,
                     &mut depths,
+                    &mut height_factors,
                 );
             }
         }
 
-        RingMesh { vertices, normals, uvs, indices, depths }
+        RingMesh { vertices, normals, uvs, indices, depths, height_factors }
     }
 
     fn connect_cross_section_perimeters_with_depth(
@@ -132,6 +135,7 @@ impl TreeStructure {
         uvs: &mut Vec<Vec2>,
         indices: &mut Vec<u32>,
         depths: &mut Vec<u32>,
+        height_factors: &mut Vec<f32>,
     ) {
         let base_vertex_idx = vertices.len() as u32;
         let resolution = parent_geo.points.len().min(child_geo.points.len());
@@ -164,11 +168,45 @@ impl TreeStructure {
             normals.push(face_normal);
         }
 
-        // Generate UVs (u = around circumference, v = along branch)
+        // Calculate center points from geometry
+        let parent_center = parent_geo.points.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / parent_geo.points.len() as f32;
+        let child_center = child_geo.points.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / child_geo.points.len() as f32;
+        
+        // Generate UVs with proper scaling for seamless bark texture
+        let parent_radius = parent_geo.points[0].distance(parent_center);
+        let child_radius = child_geo.points[0].distance(child_center);
+        let segment_length = parent_center.distance(child_center);
+        
+        // Calculate height-based texture blending factor (0 = trunk, 1 = high branches)
+        let tree_height = 10.0; // Should be passed as parameter
+        let parent_height = parent_center.y;
+        let child_height = child_center.y;
+        let parent_blend_factor = (parent_height / tree_height).clamp(0.0, 1.0);
+        let child_blend_factor = (child_height / tree_height).clamp(0.0, 1.0);
+        
         for i in 0..resolution {
-            let u = i as f32 / resolution as f32;
-            uvs.push(Vec2::new(u, 0.0)); // Parent ring
-            uvs.push(Vec2::new(u, 1.0)); // Child ring
+            // U coordinate: circumferential, scaled by radius for consistent texture density
+            let angle = (i as f32 / resolution as f32) * 2.0 * std::f32::consts::PI;
+            let u_parent = (angle * parent_radius) / (2.0 * std::f32::consts::PI * 0.5); // 0.5m texture repeat
+            let u_child = (angle * child_radius) / (2.0 * std::f32::consts::PI * 0.5);
+            
+            // V coordinate: along branch length, with height-based scaling
+            // Lower sections (trunk) get larger V scale for detailed bark
+            // Higher sections (branches) get smaller V scale for smoother appearance
+            let v_scale_parent = 1.0 + parent_blend_factor * 2.0; // 1x to 3x scaling
+            let v_scale_child = 1.0 + child_blend_factor * 2.0;
+            
+            let v_parent = 0.0;
+            let v_child = (segment_length * v_scale_child) / 1.0; // 1m texture repeat base
+            
+            // Store texture coordinates with height-based blend factor in UV.z (if available)
+            // Or use the existing Vec2 and pass blend factor separately
+            uvs.push(Vec2::new(u_parent % 1.0, v_parent % 1.0)); // Parent ring
+            uvs.push(Vec2::new(u_child % 1.0, v_child % 1.0)); // Child ring
+            
+            // Store height factors for bark texture blending
+            height_factors.push(parent_blend_factor); // Parent vertex
+            height_factors.push(child_blend_factor);   // Child vertex
         }
 
         // Create quad faces between ring perimeters (tubular surface)

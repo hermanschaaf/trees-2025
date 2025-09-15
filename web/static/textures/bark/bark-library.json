@@ -22,7 +22,7 @@
       "diffuse": "fir_diffuse.jpg",
       "normal": "fir_normal.jpg",
       "roughness": "fir_roughness.jpg",
-      "scale": 0.01,
+      "scale": 1.0,
       "tiling": [1.0, 1.0],
       "color": "#654321"
     },
