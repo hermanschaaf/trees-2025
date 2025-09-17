@@ -88,36 +88,36 @@ export const initializeTreeViewer = async (container: HTMLElement): Promise<(() 
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
-  // Tree parameters
+  // Tree parameters - using default values that match our new parameter structure
   const treeParams = {
-    height: tree.trunk_height,
-    butressing: tree.butressing,
-    splitHeight: tree.split_height,
-    segmentLength: tree.segment_length,
-    branchAngleMin: tree.branch_angle_min,
-    branchAngleMax: tree.branch_angle_max,
-    bendAngleMin: tree.bend_angle_min,
-    bendAngleMax: tree.bend_angle_max,
-    branchFrequencyMin: tree.branch_frequency_min,
-    branchFrequencyMax: tree.branch_frequency_max,
-    maxDepth: tree.max_depth,
-    radiusTaper: tree.radius_taper,
-    trunkRingSpread: tree.trunk_ring_spread,
+    height: 5.0,
+    butressing: 1.0,
+    splitHeight: 3.0,
+    segmentLength: 0.3,
+    branchAngleMin: 25.0,
+    branchAngleMax: 45.0,
+    bendAngleMin: -15.0,
+    bendAngleMax: 15.0,
+    branchFrequencyMin: 2,
+    branchFrequencyMax: 4,
+    maxDepth: 8,
+    radiusTaper: 0.8,
+    trunkRingSpread: 0.5,
     segmentLengthVariation: 0.3,
-    trunkSize: tree.trunk_size,
-    branchAzimuthVariation: tree.branch_azimuth_variation,
-    maxBranchReach: tree.max_branch_reach,
+    trunkSize: 1.0,
+    branchAzimuthVariation: 0.8,
+    maxBranchReach: 25.0,
     radius: 0.5,
     radialSegments: 32,
-    rootEnable: tree.root_enable,
-    rootDepth: tree.root_depth,
-    rootSpread: tree.root_spread,
-    rootDensity: tree.root_density,
-    rootSegmentLength: tree.root_segment_length,
-    twigEnable: tree.twig_enable,
-    twigDensity: tree.twig_density,
+    rootEnable: true,
+    rootDepth: 3.0,
+    rootSpread: 2.5,
+    rootDensity: 6,
+    rootSegmentLength: 0.25,
+    twigEnable: true,
+    twigDensity: 1.0,
     twigScale: 1.0,
-    twigAngleVariation: tree.twig_angle_variation,
+    twigAngleVariation: 0.5,
     twigBaseAngle: 45.0,
     windEnabled: true,
     windStrength: 0.2,
@@ -768,7 +768,12 @@ export const initializeTreeViewer = async (container: HTMLElement): Promise<(() 
   controls.dampingFactor = 0.05;
 
   // GUI Controls
-  const gui = new dat.GUI({ width: 320 });
+  const gui = new dat.GUI({ width: 320, autoPlace: false });
+  container.appendChild(gui.domElement);
+  gui.domElement.style.position = 'absolute';
+  gui.domElement.style.top = '80px';
+  gui.domElement.style.right = '10px';
+  gui.domElement.style.zIndex = '1000';
   guiInstance = gui;
   const treeFolder = gui.addFolder('Tree Parameters');
 
@@ -996,19 +1001,7 @@ export const initializeTreeViewer = async (container: HTMLElement): Promise<(() 
       redrawTree();
     });
     
-    // Add info display for selected twig
-    const selectedTwigInfo = twigLibrary.twigs.find(t => t.id === selectedTwigType);
-    if (selectedTwigInfo) {
-      const infoParams = {
-        description: selectedTwigInfo.description,
-        type: selectedTwigInfo.type
-      };
-      
-      twigLibraryFolder.add(infoParams, 'description').name('Description').listen();
-      twigLibraryFolder.add(infoParams, 'type').name('Type').listen();
-    }
-    
-    twigLibraryFolder.open();
+    // twigLibraryFolder.open(); // Collapsed by default
   }
 
   // Add bark texture controls
@@ -1055,19 +1048,7 @@ export const initializeTreeViewer = async (container: HTMLElement): Promise<(() 
       updateBarkMaterial();
     });
     
-    // Add info display for selected bark
-    const selectedBarkInfo = barkLibrary.textures.find(t => t.id === selectedBarkType);
-    if (selectedBarkInfo) {
-      const barkInfoParams = {
-        description: selectedBarkInfo.description,
-        type: selectedBarkInfo.type
-      };
-      
-      barkFolder.add(barkInfoParams, 'description').name('Description').listen();
-      barkFolder.add(barkInfoParams, 'type').name('Type').listen();
-    }
-    
-    barkFolder.open();
+    // barkFolder.open(); // Collapsed by default
   }
 
   // Wind animation controls
@@ -1093,9 +1074,7 @@ export const initializeTreeViewer = async (container: HTMLElement): Promise<(() 
     redrawTree();
   });
 
-  // Export controls
-  const exportFolder = gui.addFolder('Export');
-
+  // Export function - moved to top menu
   const downloadGltf = () => {
     try {
       console.log('Exporting GLTF...');
@@ -1120,16 +1099,14 @@ export const initializeTreeViewer = async (container: HTMLElement): Promise<(() 
     }
   };
 
-  exportFolder.add({ downloadGltf }, 'downloadGltf').name('Download GLTF');
-
-  // Open important folders
-  treeFolder.open();
-  visualFolder.open();
-  rootFolder.open();
-  twigFolder.open();
-  windFolder.open();
-  debugFolder.open();
-  exportFolder.open();
+  // Collapse all folders by default - preparing for new high-level controls
+  // treeFolder.open();
+  // advancedFolder.open();
+  // visualFolder.open();
+  // rootFolder.open();
+  // twigFolder.open();
+  // windFolder.open();
+  // debugFolder.open();
 
   // Animation loop
   function animate() {
@@ -1192,30 +1169,45 @@ export const initializeTreeViewer = async (container: HTMLElement): Promise<(() 
   // Start animation
   animate();
 
-  // Return cleanup function
-  return () => {
-    // Cancel animation
-    if (animationId) {
-      cancelAnimationFrame(animationId);
-      animationId = null;
-    }
-    
-    // Remove GUI
-    if (guiInstance) {
-      guiInstance.destroy();
-      guiInstance = null;
-    }
-    
-    // Remove event listeners
-    window.removeEventListener('resize', handleResize);
-    
-    // Remove renderer from DOM
-    if (container.contains(renderer.domElement)) {
-      container.removeChild(renderer.domElement);
-    }
-    
-    // Dispose of Three.js resources
-    renderer.dispose();
-    scene.clear();
+  // Return cleanup function and exported functions
+  return {
+    cleanup: () => {
+      console.log('treeViewerCore: Starting cleanup');
+      
+      // Cancel animation
+      if (animationId) {
+        console.log('treeViewerCore: Cancelling animation');
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      
+      // Remove GUI
+      if (guiInstance) {
+        console.log('treeViewerCore: Destroying GUI');
+        if (container.contains(guiInstance.domElement)) {
+          container.removeChild(guiInstance.domElement);
+        }
+        guiInstance.destroy();
+        guiInstance = null;
+      }
+      
+      // Remove event listeners
+      console.log('treeViewerCore: Removing event listeners');
+      window.removeEventListener('resize', handleResize);
+      
+      // Remove renderer from DOM
+      if (container.contains(renderer.domElement)) {
+        console.log('treeViewerCore: Removing renderer from DOM');
+        container.removeChild(renderer.domElement);
+      }
+      
+      // Dispose of Three.js resources
+      console.log('treeViewerCore: Disposing Three.js resources');
+      renderer.dispose();
+      scene.clear();
+      
+      console.log('treeViewerCore: Cleanup complete');
+    },
+    downloadGltf
   };
 };

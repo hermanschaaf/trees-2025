@@ -1,0 +1,30 @@
+.forest-designer-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.forest-designer-content {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f5f5f5;
+  height: calc(100vh - 40px); /* 40px TopMenu only */
+}
+
+.forest-placeholder {
+  text-align: center;
+  color: #666;
+}
+
+.forest-placeholder h2 {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  color: #333;
+}
+
+.forest-placeholder p {
+  font-size: 1.2rem;
+  opacity: 0.7;
+}

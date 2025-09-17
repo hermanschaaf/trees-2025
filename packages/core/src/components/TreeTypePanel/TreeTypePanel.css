@@ -1,0 +1,109 @@
+.tree-type-dropdown {
+  position: absolute;
+  top: 60px; /* Below TopMenu with some padding */
+  left: 20px;
+  z-index: 1000;
+}
+
+.tree-type-trigger {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 16px;
+  font-weight: 500;
+  color: #333;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+}
+
+.tree-type-trigger:hover {
+  background: rgba(255, 255, 255, 1);
+  border-color: #007bff;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.tree-type-trigger-icon {
+  font-size: 20px;
+  margin-right: 8px;
+}
+
+.tree-type-trigger-text {
+  flex: 1;
+  text-align: left;
+}
+
+.tree-type-trigger-arrow {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #666;
+}
+
+.tree-type-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  z-index: 1001;
+}
+
+.tree-type-dropdown-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  border-bottom: 1px solid rgba(224, 224, 224, 0.5);
+}
+
+.tree-type-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.tree-type-dropdown-item:hover {
+  background: rgba(0, 123, 255, 0.1);
+}
+
+.tree-type-dropdown-item.selected {
+  background: rgba(0, 123, 255, 0.15);
+  color: #007bff;
+}
+
+.tree-type-item-icon {
+  font-size: 24px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.tree-type-item-info {
+  flex: 1;
+}
+
+.tree-type-item-name {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.tree-type-item-description {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.3;
+}

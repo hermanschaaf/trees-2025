@@ -1,6 +1,13 @@
 .app {
   width: 100vw;
   height: 100vh;
+}
+
+.tree-designer-screen {
+  overflow: hidden;
+}
+
+.forest-designer-screen {
   overflow: hidden;
 }
 
@@ -12,5 +19,4 @@
 
 html, body {
   height: 100%;
-  overflow: hidden;
 }
